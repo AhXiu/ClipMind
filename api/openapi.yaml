@@ -1,0 +1,145 @@
+openapi: 3.0.3
+info:
+  title: ClipMind Phase 1 API
+  version: 1.0.0
+  description: Android 采集、卡片查询、确认、回滚和同步重试接口。
+servers:
+  - url: http://localhost:8080
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      responses:
+        '200': { description: 服务健康 }
+  /metrics:
+    get:
+      security: []
+      responses:
+        '200': { description: 进程内指标快照 }
+  /v1/captures:batch:
+    post:
+      summary: 批量提交端侧摘抄
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaptureBatchRequest' }
+      responses:
+        '202':
+          description: 已处理，逐项返回接收或拒绝结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaptureBatchResponse' }
+        '400': { description: 请求格式错误 }
+        '401': { description: 未认证 }
+  /v1/cards/{cardId}:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      responses:
+        '200': { description: 当前卡片 }
+        '404': { description: 卡片不存在 }
+  /v1/cards/{cardId}/versions:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      responses:
+        '200': { description: 不可变卡片版本列表 }
+  /v1/cards/{cardId}/confirm:
+    post:
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      responses:
+        '200': { description: 已确认并触发发布同步 }
+        '409': { description: 当前状态不允许确认 }
+  /v1/cards/{cardId}/rollback:
+    post:
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version_id]
+              properties:
+                version_id: { type: string }
+      responses:
+        '200': { description: 已切换活动版本 }
+        '409': { description: 当前状态不允许回滚 }
+  /v1/cards/{cardId}/sync:retry:
+    post:
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      responses:
+        '200': { description: 已重新触发单向同步 }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    CardId:
+      in: path
+      name: cardId
+      required: true
+      schema: { type: string }
+  schemas:
+    CaptureBatchRequest:
+      type: object
+      required: [captures]
+      additionalProperties: false
+      properties:
+        captures:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: '#/components/schemas/ClipEvent' }
+    ClipEvent:
+      type: object
+      required: [client_capture_id, raw_text, mode, captured_at]
+      additionalProperties: false
+      properties:
+        client_capture_id: { type: string, minLength: 1 }
+        raw_text: { type: string, minLength: 1 }
+        text_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: raw_text UTF-8 字节的小写 SHA-256，可选但提供时必须匹配。
+        source_app: { type: string }
+        source_url: { type: string }
+        mode: { type: string, enum: [auto, confirm] }
+        captured_at: { type: string, format: date-time }
+    AcceptedCapture:
+      type: object
+      required: [client_capture_id, capture_id, card_id]
+      properties:
+        client_capture_id: { type: string }
+        capture_id: { type: string }
+        card_id: { type: string }
+        duplicate: { type: boolean }
+    RejectedCapture:
+      type: object
+      required: [code, message]
+      properties:
+        client_capture_id: { type: string }
+        code: { type: string }
+        message: { type: string }
+    CaptureBatchResponse:
+      type: object
+      required: [accepted, rejected]
+      properties:
+        accepted:
+          type: array
+          items: { $ref: '#/components/schemas/AcceptedCapture' }
+        rejected:
+          type: array
+          items: { $ref: '#/components/schemas/RejectedCapture' }

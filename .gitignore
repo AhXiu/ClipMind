@@ -1,0 +1,35 @@
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Go
+backend/bin/
+backend/data/
+backend/obsidian-vault/
+*.test
+coverage.out
+
+# Environment and secrets
+.env
+*.key
+*.pem
+secrets/
+
+# Logs and temporary files
+*.log
+*.tmp
+.tmp/
+tmp/

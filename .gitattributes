@@ -1,0 +1,9 @@
+* text=auto
+*.bat text eol=crlf
+*.sh text eol=lf
+*.kt text eol=lf
+*.kts text eol=lf
+*.go text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf

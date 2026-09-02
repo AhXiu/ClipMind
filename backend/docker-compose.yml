@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      CLIPMIND_ADDR: :8080
+      CLIPMIND_DATA_DIR: /data
+      CLIPMIND_VAULT_DIR: /vault
+    volumes:
+      - clipmind-data:/data
+      - clipmind-vault:/vault
+    restart: unless-stopped
+volumes:
+  clipmind-data:
+  clipmind-vault:
