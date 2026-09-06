@@ -13,6 +13,8 @@ type Transaction interface {
 	CreateCapture(c domain.Capture) (domain.Capture, bool, error)
 	UpdateCapture(c domain.Capture) error
 	CreateCard(c domain.Card) error
+	UpdateCard(c domain.Card) error
+	AddVersion(v domain.CardVersion) (domain.CardVersion, error)
 }
 
 type Repository interface {
@@ -24,6 +26,7 @@ type Repository interface {
 	GetCapture(id string) (domain.Capture, error)
 	ListPipelineReady(limit int) ([]domain.Capture, error)
 	RecoverStaleAIRunning(before time.Time) (int, error)
+	RecoverStaleSyncing(before time.Time) (int, error)
 	CreateCard(c domain.Card) error
 	UpdateCard(c domain.Card) error
 	GetCard(id string) (domain.Card, error)

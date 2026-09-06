@@ -52,7 +52,7 @@ func main() {
 	cards := service.Cards{Repo: repo, Sync: syncer.Obsidian{Vault: cfg.VaultDir}}
 	bookVerifier := books.NewOpenLibrary()
 	bookVerifier.Metrics = m
-	worker := &pipeline.Worker{Repo: repo, LLM: provider, Books: bookVerifier, Metrics: m, Interval: cfg.WorkerInterval, MaxAttempts: 3}
+	worker := &pipeline.Worker{Repo: repo, LLM: provider, Books: bookVerifier, Metrics: m, Interval: cfg.WorkerInterval, MaxAttempts: 3, Cards: cards}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	go worker.Run(ctx)

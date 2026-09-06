@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -159,6 +160,27 @@ func (t *fileTx) CreateCard(c domain.Card) error {
 	t.s.Cards[c.ID] = c
 	return nil
 }
+func (t *fileTx) UpdateCard(c domain.Card) error {
+	if _, ok := t.s.Cards[c.ID]; !ok {
+		return ErrNotFound
+	}
+	t.s.Cards[c.ID] = c
+	return nil
+}
+func (t *fileTx) AddVersion(v domain.CardVersion) (domain.CardVersion, error) {
+	if _, ok := t.s.Versions[v.ID]; ok {
+		return v, errors.New("version exists")
+	}
+	max := 0
+	for _, existing := range t.s.Versions {
+		if existing.CardID == v.CardID && existing.Number > max {
+			max = existing.Number
+		}
+	}
+	v.Number = max + 1
+	t.s.Versions[v.ID] = v
+	return v, nil
+}
 func (r *FileRepository) GetReceipt(k string) ([]byte, bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -190,7 +212,7 @@ func (r *FileRepository) ListPipelineReady(limit int) ([]domain.Capture, error) 
 	defer r.mu.RUnlock()
 	a := []domain.Capture{}
 	for _, v := range r.s.Captures {
-		if v.Status == domain.StatusPersisted || v.Status == domain.StatusAIFailed {
+		if v.Status == domain.StatusPersisted || v.Status == domain.StatusAIFailed || v.Status == domain.StatusAISucceeded || (v.Status == domain.StatusPublished && strings.EqualFold(v.Mode, "auto")) {
 			v.StatusHistory = append([]domain.StatusEvent(nil), v.StatusHistory...)
 			a = append(a, v)
 		}
@@ -241,6 +263,44 @@ func (r *FileRepository) RecoverStaleAIRunning(before time.Time) (count int, err
 			card.UpdatedAt = now
 			next.Cards[card.ID] = card
 		}
+	}
+	if err = r.persistState(next); err != nil {
+		return 0, err
+	}
+	r.s = next
+	r.persistCount++
+	return count, nil
+}
+func (r *FileRepository) RecoverStaleSyncing(before time.Time) (count int, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	next := cloneState(r.s)
+	now := time.Now().UTC()
+	for id, c := range next.Captures {
+		if c.Status != domain.StatusSyncing {
+			continue
+		}
+		started := c.CreatedAt
+		if n := len(c.StatusHistory); n > 0 {
+			started = c.StatusHistory[n-1].At
+		}
+		if started.After(before) {
+			continue
+		}
+		c.Status = domain.StatusPublished
+		c.StatusHistory = append(c.StatusHistory, domain.StatusEvent{Status: domain.StatusPublished, At: now})
+		c.LastError = "recovered stale syncing"
+		next.Captures[id] = c
+		if card, ok := next.Cards[c.CardID]; ok {
+			card.Status = domain.StatusPublished
+			card.LastError = c.LastError
+			card.UpdatedAt = now
+			next.Cards[card.ID] = card
+		}
+		count++
+	}
+	if count == 0 {
+		return 0, nil
 	}
 	if err = r.persistState(next); err != nil {
 		return 0, err

@@ -7,6 +7,7 @@ import com.clipmind.android.BuildConfig
 import com.clipmind.android.ClipMindApp
 import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
+import com.clipmind.android.data.ServerCardOperationResult
 import com.clipmind.android.network.HealthCheckResult
 import com.clipmind.android.service.CaptureForegroundService
 import com.clipmind.android.service.CaptureProcessingDiagnostic
@@ -27,6 +28,15 @@ sealed interface ConnectionUiState {
     data class Failed(val reason: String) : ConnectionUiState
 }
 
+sealed interface CardOperationUiState {
+    data object Working : CardOperationUiState
+    data class Success(val status: String) : CardOperationUiState
+    data class Failed(val errorCode: String) : CardOperationUiState
+}
+
+internal fun shouldShowPublishAction(mode: CaptureMode, serverCardStatus: String?): Boolean =
+    mode == CaptureMode.CONFIRM && serverCardStatus == "awaiting_confirm"
+
 data class MainUiState(
     val shizukuState: ShizukuState = ShizukuState.UNAVAILABLE,
     val captureRequested: Boolean = false,
@@ -38,12 +48,14 @@ data class MainUiState(
     val connectionState: ConnectionUiState = ConnectionUiState.Idle,
     val clipboardDiagnostic: ClipboardDiagnosticUiState = ClipboardDiagnosticUiState.Idle,
     val captureProcessingDiagnostic: CaptureProcessingDiagnostic? = null,
+    val cardOperations: Map<Long, CardOperationUiState> = emptyMap(),
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as ClipMindApp
     private val container = app.container
     private val connectionState = MutableStateFlow<ConnectionUiState>(ConnectionUiState.Idle)
+    private val cardOperations = MutableStateFlow<Map<Long, CardOperationUiState>>(emptyMap())
 
     val uiState: StateFlow<MainUiState> = combine(
         container.shizuku.state,
@@ -61,6 +73,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         state.copy(clipboardDiagnostic = diagnostic)
     }.combine(container.captureDiagnostics.latest) { state, diagnostic ->
         state.copy(captureProcessingDiagnostic = diagnostic)
+    }.combine(cardOperations) { state, operations ->
+        state.copy(cardOperations = operations)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     fun requestShizukuPermission() = container.shizuku.requestPermission()
@@ -72,6 +86,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopCapture() = CaptureForegroundService.stop(app)
     fun confirm(id: Long) = viewModelScope.launch { container.repository.confirm(id) }
     fun discard(id: Long) = viewModelScope.launch { container.repository.discard(id) }
+
+    fun refreshServerCard(id: Long, cardId: String) = runCardOperation(id) {
+        container.cardRepository.refreshServerCard(id, cardId)
+    }
+
+    fun confirmServerCard(id: Long, cardId: String) = runCardOperation(id) {
+        container.cardRepository.confirmServerCard(id, cardId)
+    }
+
+    private fun runCardOperation(
+        id: Long,
+        operation: suspend () -> ServerCardOperationResult,
+    ) {
+        if (cardOperations.value[id] == CardOperationUiState.Working) return
+        cardOperations.value = cardOperations.value + (id to CardOperationUiState.Working)
+        viewModelScope.launch {
+            cardOperations.value = cardOperations.value + (id to when (val result = operation()) {
+                is ServerCardOperationResult.Success -> CardOperationUiState.Success(result.card.status)
+                is ServerCardOperationResult.Failure -> CardOperationUiState.Failed(result.errorCode)
+            })
+        }
+    }
 
     fun testClipboardRead() {
         if (container.shizuku.clipboardDiagnostic.value == ClipboardDiagnosticUiState.Checking) return

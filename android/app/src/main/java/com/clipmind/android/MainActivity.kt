@@ -42,9 +42,11 @@ import com.clipmind.android.service.CaptureProcessingDiagnostic
 import com.clipmind.android.service.toUiDescription
 import com.clipmind.android.shizuku.ClipboardDiagnosticUiState
 import com.clipmind.android.shizuku.ShizukuState
+import com.clipmind.android.ui.CardOperationUiState
 import com.clipmind.android.ui.ConnectionUiState
 import com.clipmind.android.ui.MainUiState
 import com.clipmind.android.ui.MainViewModel
+import com.clipmind.android.ui.shouldShowPublishAction
 import java.text.DateFormat
 import java.util.Date
 
@@ -86,7 +88,7 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -
                 Text("采集模式", style = MaterialTheme.typography.titleMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(state.mode == CaptureMode.AUTO, { vm.setMode(CaptureMode.AUTO) }, { Text("自动") })
-                    FilterChip(state.mode == CaptureMode.CONFIRM, { vm.setMode(CaptureMode.CONFIRM) }, { Text("确认后上传") })
+                    FilterChip(state.mode == CaptureMode.CONFIRM, { vm.setMode(CaptureMode.CONFIRM) }, { Text("本地确认后上传") })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = startCapture, enabled = !state.captureRequested) { Text("启动采集") }
@@ -95,12 +97,16 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -
             }
             item { ConnectionCard(state.apiBaseUrl, state.connectionState, vm) }
             item { TokenCard(state.tokenConfigured, vm) }
-            item { Text("待确认 (${state.pending.size})", style = MaterialTheme.typography.titleMedium) }
-            if (state.pending.isEmpty()) item { Text("暂无待确认内容") }
-            items(state.pending, key = { "pending-${it.id}" }) { CaptureCard(it, true, vm) }
+            item { Text("待本地确认上传 (${state.pending.size})", style = MaterialTheme.typography.titleMedium) }
+            if (state.pending.isEmpty()) item { Text("暂无待本地确认上传内容") }
+            items(state.pending, key = { "pending-${it.id}" }) {
+                CaptureCard(it, true, state.cardOperations[it.id], vm)
+            }
             item { Text("最近采集", style = MaterialTheme.typography.titleMedium) }
             if (state.recent.isEmpty()) item { Text("暂无采集记录") }
-            items(state.recent, key = { "recent-${it.id}" }) { CaptureCard(it, false, vm) }
+            items(state.recent, key = { "recent-${it.id}" }) {
+                CaptureCard(it, false, state.cardOperations[it.id], vm)
+            }
             item { Spacer(Modifier.height(24.dp)) }
         }
     }
@@ -194,21 +200,55 @@ private fun StatusCard(
 }
 
 @Composable
-private fun CaptureCard(item: CaptureUiModel, actionable: Boolean, vm: MainViewModel) {
+private fun CaptureCard(
+    item: CaptureUiModel,
+    locallyActionable: Boolean,
+    operation: CardOperationUiState?,
+    vm: MainViewModel,
+) {
+    val cardId = item.serverCardId
+    val isWorking = operation == CardOperationUiState.Working
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(item.content, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Text("状态：${item.state.name}", style = MaterialTheme.typography.bodySmall)
+            Text("本地上传状态：${item.state.name}", style = MaterialTheme.typography.bodySmall)
             Text("采集时间：${DateFormat.getDateTimeInstance().format(Date(item.capturedAt))}", style = MaterialTheme.typography.bodySmall)
-            Text("最后错误码：${item.lastErrorCode ?: "无"}", style = MaterialTheme.typography.bodySmall)
+            Text("本地最后错误码：${item.lastErrorCode ?: "无"}", style = MaterialTheme.typography.bodySmall)
             Text("重试次数：${item.retryCount}", style = MaterialTheme.typography.bodySmall)
             Text(
                 "下次重试时间：${if (item.nextRetryAt > 0) DateFormat.getDateTimeInstance().format(Date(item.nextRetryAt)) else "无"}",
                 style = MaterialTheme.typography.bodySmall,
             )
-            if (actionable) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (item.contentAvailable) Button(onClick = { vm.confirm(item.id) }) { Text("确认") }
+            Text("服务端 Card ID：${cardId ?: "尚未生成"}", style = MaterialTheme.typography.bodySmall)
+            Text("服务端状态：${item.serverCardStatus ?: "尚未刷新"}", style = MaterialTheme.typography.bodySmall)
+            Text("服务端最后错误：${item.serverLastError ?: "无"}", style = MaterialTheme.typography.bodySmall)
+            when (item.serverCardStatus) {
+                "persisted", "ai_running" -> Text("AI 处理中，请刷新", color = MaterialTheme.colorScheme.primary)
+                "synced" -> Text("已发布到 Obsidian", color = MaterialTheme.colorScheme.primary)
+            }
+            if (locallyActionable) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (item.contentAvailable) Button(onClick = { vm.confirm(item.id) }) { Text("确认上传") }
                 Button(onClick = { vm.discard(item.id) }) { Text("丢弃") }
+            }
+            if (cardId != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { vm.refreshServerCard(item.id, cardId) },
+                        enabled = !isWorking,
+                    ) { Text(if (isWorking) "处理中…" else "刷新服务端状态") }
+                    if (shouldShowPublishAction(item.mode, item.serverCardStatus)) {
+                        Button(
+                            onClick = { vm.confirmServerCard(item.id, cardId) },
+                            enabled = !isWorking,
+                        ) { Text(if (isWorking) "发布中…" else "发布到 Obsidian") }
+                    }
+                }
+                when (operation) {
+                    is CardOperationUiState.Success -> Text("操作成功，服务端状态：${operation.status}")
+                    is CardOperationUiState.Failed -> Text("操作失败：${operation.errorCode}", color = MaterialTheme.colorScheme.error)
+                    CardOperationUiState.Working -> Text("正在与服务端通信…")
+                    null -> Unit
+                }
             }
         }
     }

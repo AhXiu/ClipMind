@@ -22,4 +22,7 @@ data class CaptureOutboxEntity(
     val capturedAt: Long,
     val updatedAt: Long,
     val lastErrorCode: String? = null,
+    val serverCardId: String? = null,
+    val serverCardStatus: String? = null,
+    val serverLastError: String? = null,
 )

@@ -37,3 +37,10 @@ data class CaptureBatchResponse(
     @SerializedName("accepted") val accepted: List<AcceptedCapture> = emptyList(),
     @SerializedName("rejected") val rejected: List<RejectedCapture> = emptyList(),
 )
+
+data class ServerCard(
+    @SerializedName("id") val id: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("active_version_id") val activeVersionId: String? = null,
+    @SerializedName("last_error") val lastError: String? = null,
+)

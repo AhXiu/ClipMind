@@ -28,7 +28,7 @@ var transitions = map[Status]map[Status]bool{
 	StatusPersisted:       {StatusAIRunning: true},
 	StatusAIRunning:       {StatusAISucceeded: true, StatusAIFailed: true},
 	StatusAIFailed:        {StatusAIRunning: true},
-	StatusAISucceeded:     {StatusAwaitingConfirm: true},
+	StatusAISucceeded:     {StatusAwaitingConfirm: true, StatusPublished: true},
 	StatusAwaitingConfirm: {StatusPublished: true},
 	StatusPublished:       {StatusSyncing: true},
 	StatusSyncing:         {StatusSynced: true, StatusPublished: true},

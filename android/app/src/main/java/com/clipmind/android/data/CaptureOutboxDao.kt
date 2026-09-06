@@ -38,8 +38,14 @@ interface CaptureOutboxDao {
     @Query("UPDATE capture_outbox SET state = 'UPLOADING', updatedAt = :now WHERE id IN (:ids) AND (state = 'READY' OR state = 'RETRYABLE_ERROR')")
     suspend fun markUploading(ids: List<Long>, now: Long): Int
 
-    @Query("UPDATE capture_outbox SET state = 'SUCCEEDED', updatedAt = :now, lastErrorCode = NULL WHERE clientCaptureId IN (:clientIds) AND state = 'UPLOADING'")
-    suspend fun markSucceeded(clientIds: List<String>, now: Long): Int
+    @Query("UPDATE capture_outbox SET state = 'SUCCEEDED', serverCardId = :serverCardId, updatedAt = :now, lastErrorCode = NULL WHERE clientCaptureId = :clientId AND state = 'UPLOADING'")
+    suspend fun markSucceeded(clientId: String, serverCardId: String?, now: Long): Int
+
+    @Query("UPDATE capture_outbox SET serverCardStatus = :status, serverLastError = :serverLastError, updatedAt = :now WHERE id = :id AND serverCardId = :cardId")
+    suspend fun updateServerCard(id: Long, cardId: String, status: String, serverLastError: String?, now: Long): Int
+
+    @Query("UPDATE capture_outbox SET serverLastError = :errorCode, updatedAt = :now WHERE id = :id AND serverCardId = :cardId")
+    suspend fun updateServerCardError(id: Long, cardId: String, errorCode: String, now: Long): Int
 
     @Query("UPDATE capture_outbox SET state = 'REJECTED', updatedAt = :now, lastErrorCode = :errorCode WHERE clientCaptureId IN (:clientIds) AND state = 'UPLOADING'")
     suspend fun markRejected(clientIds: List<String>, now: Long, errorCode: String): Int

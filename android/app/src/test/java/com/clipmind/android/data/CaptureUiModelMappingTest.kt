@@ -21,6 +21,9 @@ class CaptureUiModelMappingTest {
             capturedAt = 1_724_000_000_000,
             updatedAt = 1_724_000_000_001,
             lastErrorCode = "HTTP_503",
+            serverCardId = "card-7",
+            serverCardStatus = "awaiting_confirm",
+            serverLastError = "AI_TIMEOUT",
         )
 
         val ui = entity.toUiModel(cipher)
@@ -29,5 +32,9 @@ class CaptureUiModelMappingTest {
         assertEquals("HTTP_503", ui.lastErrorCode)
         assertEquals(3, ui.retryCount)
         assertEquals(1_725_000_000_000, ui.nextRetryAt)
+        assertEquals(CaptureMode.AUTO, ui.mode)
+        assertEquals("card-7", ui.serverCardId)
+        assertEquals("awaiting_confirm", ui.serverCardStatus)
+        assertEquals("AI_TIMEOUT", ui.serverLastError)
     }
 }

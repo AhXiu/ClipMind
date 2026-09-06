@@ -22,6 +22,7 @@ type Worker struct {
 	Interval    time.Duration
 	MaxAttempts int
 	StaleAfter  time.Duration
+	Cards       service.Cards
 }
 
 func (w *Worker) Run(ctx context.Context) {
@@ -53,6 +54,13 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	for i := 0; i < recovered; i++ {
 		w.Metrics.Inc("pipeline_recovered_total")
 	}
+	recovered, e = w.Repo.RecoverStaleSyncing(time.Now().UTC().Add(-staleAfter))
+	if e != nil {
+		return e
+	}
+	for i := 0; i < recovered; i++ {
+		w.Metrics.Inc("pipeline_recovered_total")
+	}
 	items, e := w.Repo.ListPipelineReady(10)
 	if e != nil {
 		return e
@@ -65,6 +73,21 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	return nil
 }
 func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
+	if c.Status == domain.StatusPublished {
+		cards := w.Cards
+		if cards.Repo == nil {
+			cards.Repo = w.Repo
+		}
+		_, e := cards.RetrySync(c.CardID)
+		return e
+	}
+	if c.Status == domain.StatusAISucceeded {
+		card, e := w.Repo.GetCard(c.CardID)
+		if e != nil {
+			return e
+		}
+		return w.finishAI(c, &card)
+	}
 	max := w.MaxAttempts
 	if max == 0 {
 		max = 3
@@ -81,16 +104,19 @@ func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
 	}
 	c.Attempts++
 	c.LastError = ""
-	if e := w.Repo.UpdateCapture(*c); e != nil {
-		return e
-	}
 	card, e := w.Repo.GetCard(c.CardID)
 	if e != nil {
 		return e
 	}
 	card.Status = domain.StatusAIRunning
+	card.LastError = ""
 	card.UpdatedAt = time.Now().UTC()
-	if e = w.Repo.UpdateCard(card); e != nil {
+	if e = w.Repo.Transaction(func(tx store.Transaction) error {
+		if updateErr := tx.UpdateCapture(*c); updateErr != nil {
+			return updateErr
+		}
+		return tx.UpdateCard(card)
+	}); e != nil {
 		return e
 	}
 	clean := strings.Join(strings.Fields(c.Text), " ")
@@ -117,33 +143,58 @@ func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
 	now := time.Now().UTC()
 	v := domain.CardVersion{ID: service.ID("ver_"), CardID: card.ID, CreatedAt: now, CleanText: clean, PrimaryTag: result.PrimaryTag, Interpretation: result.Interpretation, Books: result.Books}
 	v.Markdown = render.Markdown(card.ID, now.Format(time.RFC3339), clean, v.PrimaryTag, v.Interpretation, v.Books)
-	v, e = w.Repo.AddVersion(v)
-	if e != nil {
-		return w.fail(c, &card, e)
-	}
-	card.VersionIDs = append(card.VersionIDs, v.ID)
-	card.ActiveVersionID = v.ID
-	card.Status = domain.StatusAISucceeded
-	card.UpdatedAt = now
-	if e = w.Repo.UpdateCard(card); e != nil {
-		return e
-	}
 	if e = c.Move(domain.StatusAISucceeded, now); e != nil {
 		return e
 	}
-	if e = c.Move(domain.StatusAwaitingConfirm, now); e != nil {
-		return e
-	}
-	card.Status = domain.StatusAwaitingConfirm
+	card.Status = domain.StatusAISucceeded
 	card.UpdatedAt = now
-	if e = w.Repo.UpdateCard(card); e != nil {
+	e = w.Repo.Transaction(func(tx store.Transaction) error {
+		var addErr error
+		v, addErr = tx.AddVersion(v)
+		if addErr != nil {
+			return addErr
+		}
+		card.VersionIDs = append(card.VersionIDs, v.ID)
+		card.ActiveVersionID = v.ID
+		if addErr = tx.UpdateCard(card); addErr != nil {
+			return addErr
+		}
+		return tx.UpdateCapture(*c)
+	})
+	if e != nil {
 		return e
 	}
-	if e = w.Repo.UpdateCapture(*c); e != nil {
+	if e = w.finishAI(c, &card); e != nil {
 		return e
 	}
 	w.Metrics.Inc("pipeline_succeeded_total")
 	return nil
+}
+
+func (w *Worker) finishAI(c *domain.Capture, card *domain.Card) error {
+	cards := w.Cards
+	if cards.Repo == nil {
+		cards.Repo = w.Repo
+	}
+	if strings.EqualFold(c.Mode, "auto") {
+		_, e := cards.AutoPublish(card.ID)
+		return e
+	}
+	now := time.Now().UTC()
+	if e := c.Move(domain.StatusAwaitingConfirm, now); e != nil {
+		return e
+	}
+	if e := domain.Transition(card.Status, domain.StatusAwaitingConfirm); e != nil {
+		return e
+	}
+	card.Status = domain.StatusAwaitingConfirm
+	card.UpdatedAt = now
+	return w.Repo.Transaction(func(tx store.Transaction) error {
+		if e := tx.UpdateCard(*card); e != nil {
+			return e
+		}
+		return tx.UpdateCapture(*c)
+	})
 }
 func (w *Worker) fail(c *domain.Capture, card *domain.Card, cause error) error {
 	now := time.Now().UTC()
@@ -152,7 +203,11 @@ func (w *Worker) fail(c *domain.Capture, card *domain.Card, cause error) error {
 	card.Status = domain.StatusAIFailed
 	card.LastError = "pipeline step failed"
 	card.UpdatedAt = now
-	_ = w.Repo.UpdateCapture(*c)
-	_ = w.Repo.UpdateCard(*card)
+	_ = w.Repo.Transaction(func(tx store.Transaction) error {
+		if e := tx.UpdateCapture(*c); e != nil {
+			return e
+		}
+		return tx.UpdateCard(*card)
+	})
 	return errors.New("pipeline step failed: " + cause.Error())
 }

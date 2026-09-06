@@ -5,6 +5,7 @@ import com.clipmind.android.data.CaptureOutboxEntity
 import com.clipmind.android.data.OutboxState
 import com.clipmind.android.network.dto.CaptureBatchRequest
 import com.clipmind.android.network.dto.CaptureBatchResponse
+import com.clipmind.android.network.dto.ServerCard
 import com.clipmind.android.security.FakeTextCipher
 import com.google.gson.Gson
 import com.google.gson.JsonParser
@@ -60,6 +61,18 @@ class CaptureContractTest {
         assertEquals("c2", response.rejected.single().clientCaptureId)
         assertEquals("filtered_reject", response.rejected.single().code)
         assertEquals("filtered", response.rejected.single().message)
+    }
+
+    @Test fun serverCardParsesBackendFieldsAndStatus() {
+        val card = gson.fromJson(
+            """{"id":"card-1","status":"awaiting_confirm","active_version_id":"version-2","last_error":"AI_TIMEOUT"}""",
+            ServerCard::class.java,
+        )
+
+        assertEquals("card-1", card.id)
+        assertEquals("awaiting_confirm", card.status)
+        assertEquals("version-2", card.activeVersionId)
+        assertEquals("AI_TIMEOUT", card.lastError)
     }
 
     @Test fun idempotencyKeyIsStableForOrderedClientIds() {

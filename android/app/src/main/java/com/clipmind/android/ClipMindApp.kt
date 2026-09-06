@@ -2,6 +2,7 @@ package com.clipmind.android
 
 import android.app.Application
 import com.clipmind.android.data.CaptureRepository
+import com.clipmind.android.data.CardRepository
 import com.clipmind.android.data.ClipMindDatabase
 import com.clipmind.android.data.UserSettings
 import com.clipmind.android.domain.LocalSafetyFilter
@@ -44,6 +45,12 @@ class AppContainer(app: Application) {
         }
     }
     private val immediateUploadScheduler = WorkManagerImmediateUploadScheduler(app)
+    val api: CaptureApi = Retrofit.Builder()
+        .baseUrl(BuildConfig.API_BASE_URL)
+        .client(OkHttpClient.Builder().build())
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+        .create(CaptureApi::class.java)
     val repository = CaptureRepository(
         database,
         LocalSafetyFilter(blockedSources = setOf(
@@ -52,11 +59,6 @@ class AppContainer(app: Application) {
         textCipher,
         immediateUploadScheduler,
     )
-    val api: CaptureApi = Retrofit.Builder()
-        .baseUrl(BuildConfig.API_BASE_URL)
-        .client(OkHttpClient.Builder().build())
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
-        .create(CaptureApi::class.java)
+    val cardRepository = CardRepository(api, database.captureOutboxDao(), tokenStore)
     val healthChecker = HealthChecker(api)
 }

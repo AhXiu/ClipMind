@@ -9,6 +9,7 @@ import com.clipmind.android.data.CaptureOutboxEntity
 import com.clipmind.android.network.BatchRequestMetadata
 import com.clipmind.android.network.dto.CaptureBatchRequest
 import com.clipmind.android.network.dto.CaptureBatchResponse
+import com.clipmind.android.network.dto.AcceptedCapture
 import com.clipmind.android.network.prepareUploadBatch
 import kotlin.math.min
 import kotlinx.coroutines.sync.Mutex
@@ -64,8 +65,12 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
             return Result.retry()
         }
         val batchByClientId = batch.associateBy { it.clientCaptureId }
-        val acceptedIds = body.accepted.map { it.clientCaptureId }.filter(batchByClientId::containsKey).toSet()
-        if (acceptedIds.isNotEmpty()) dao.markSucceeded(acceptedIds.toList(), System.currentTimeMillis())
+        val acceptedMappings = acceptedCardMappings(batch, body)
+        val acceptedIds = acceptedMappings.map { it.clientCaptureId }.toSet()
+        val succeededAt = System.currentTimeMillis()
+        acceptedMappings.forEach { accepted ->
+            dao.markSucceeded(accepted.clientCaptureId, accepted.cardId, succeededAt)
+        }
 
         val rejected = body.rejected
             .filter { it.clientCaptureId in batchByClientId && it.clientCaptureId !in acceptedIds }
@@ -107,4 +112,12 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
     private companion object {
         val uploadMutex = Mutex()
     }
+}
+
+internal fun acceptedCardMappings(
+    batch: List<CaptureOutboxEntity>,
+    body: CaptureBatchResponse,
+): List<AcceptedCapture> {
+    val expectedClientIds = batch.mapTo(mutableSetOf()) { it.clientCaptureId }
+    return body.accepted.filter { it.clientCaptureId in expectedClientIds }
 }

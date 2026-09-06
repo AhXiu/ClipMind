@@ -21,6 +21,10 @@ data class CaptureUiModel(
     val lastErrorCode: String?,
     val retryCount: Int,
     val nextRetryAt: Long,
+    val mode: CaptureMode,
+    val serverCardId: String?,
+    val serverCardStatus: String?,
+    val serverLastError: String?,
 )
 
 class CaptureRepository(
@@ -80,6 +84,10 @@ internal fun CaptureOutboxEntity.toUiModel(cipher: TextCipher): CaptureUiModel {
         lastErrorCode = lastErrorCode,
         retryCount = retryCount,
         nextRetryAt = nextRetryAt,
+        mode = mode,
+        serverCardId = serverCardId,
+        serverCardStatus = serverCardStatus,
+        serverLastError = serverLastError,
     )
 }
 
