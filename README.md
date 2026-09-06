@@ -54,7 +54,7 @@ make vet-backend
 make test-android
 ```
 
-安全基线见 [docs/security.md](docs/security.md)，接口契约见 [api/openapi.yaml](api/openapi.yaml)。
+安全基线见 [docs/security.md](docs/security.md)，接口与数据落盘说明见 [docs/api-and-storage.md](docs/api-and-storage.md)，机器可读契约见 [api/openapi.yaml](api/openapi.yaml)。
 
 ## 当前状态
 
