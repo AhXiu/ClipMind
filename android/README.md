@@ -9,13 +9,19 @@
 - minSdk 26，targetSdk/compileSdk 35
 
 ```bash
+# 当前 Debug 默认连接 BOE 测试服务：http://10.37.228.188:8080/
 # 正式 token 必须在应用 UI 中保存；不要通过 Gradle/BuildConfig 注入
-./gradlew testDebugUnitTest -Pclipmind.baseUrl=https://api.example.com/
+./gradlew testDebugUnitTest
+./gradlew assembleDebug
+
+# 如需临时覆盖后端地址，URL 必须以 / 结尾
 ./gradlew assembleDebug -Pclipmind.baseUrl=https://api.example.com/
 
 # 仅本地 debug 开发可选；该值会进入 debug APK，严禁用于生产凭证
 ./gradlew assembleDebug -Pclipmind.debugAuthToken=temporary-dev-token
 ```
+
+Debug Manifest 仅为当前 BOE 联调开放明文 HTTP；Release 构建不会继承该设置。
 
 > **安全警告：`clipmind.debugAuthToken` 只能用于临时本地调试，绝不能填写生产 Token。Release 构建中的该默认值强制为空。** 正式 Token 应在应用 UI 中保存，随后使用独立 Android Keystore 密钥加密并存入 SharedPreferences；界面不回显 Token。
 
