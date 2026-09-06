@@ -6,10 +6,12 @@ import com.clipmind.android.data.ClipMindDatabase
 import com.clipmind.android.data.UserSettings
 import com.clipmind.android.domain.LocalSafetyFilter
 import com.clipmind.android.network.CaptureApi
+import com.clipmind.android.network.HealthChecker
 import com.clipmind.android.security.AndroidKeystoreTextCipher
 import com.clipmind.android.security.SecureTokenStore
 import com.clipmind.android.shizuku.ShizukuController
 import com.clipmind.android.worker.UploadScheduler
+import com.clipmind.android.worker.WorkManagerImmediateUploadScheduler
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -39,13 +41,20 @@ class AppContainer(app: Application) {
             store.saveToken(BuildConfig.DEBUG_AUTH_TOKEN)
         }
     }
-    val repository = CaptureRepository(database, LocalSafetyFilter(blockedSources = setOf(
-        "com.android.systemui", "com.google.android.apps.authenticator2",
-    )), textCipher)
+    private val immediateUploadScheduler = WorkManagerImmediateUploadScheduler(app)
+    val repository = CaptureRepository(
+        database,
+        LocalSafetyFilter(blockedSources = setOf(
+            "com.android.systemui", "com.google.android.apps.authenticator2",
+        )),
+        textCipher,
+        immediateUploadScheduler,
+    )
     val api: CaptureApi = Retrofit.Builder()
         .baseUrl(BuildConfig.API_BASE_URL)
         .client(OkHttpClient.Builder().build())
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(CaptureApi::class.java)
+    val healthChecker = HealthChecker(api)
 }

@@ -2,6 +2,10 @@ package com.clipmind.android.network.dto
 
 import com.google.gson.annotations.SerializedName
 
+data class HealthResponse(
+    @SerializedName("status") val status: String,
+)
+
 data class CaptureUploadItem(
     @SerializedName("client_capture_id") val clientCaptureId: String,
     @SerializedName("raw_text") val rawText: String,

@@ -3,16 +3,26 @@ package com.clipmind.android.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.clipmind.android.BuildConfig
 import com.clipmind.android.ClipMindApp
 import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
+import com.clipmind.android.network.HealthCheckResult
 import com.clipmind.android.service.CaptureForegroundService
 import com.clipmind.android.shizuku.ShizukuState
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+sealed interface ConnectionUiState {
+    data object Idle : ConnectionUiState
+    data object Checking : ConnectionUiState
+    data object Connected : ConnectionUiState
+    data class Failed(val reason: String) : ConnectionUiState
+}
 
 data class MainUiState(
     val shizukuState: ShizukuState = ShizukuState.UNAVAILABLE,
@@ -21,11 +31,14 @@ data class MainUiState(
     val tokenConfigured: Boolean = false,
     val pending: List<CaptureUiModel> = emptyList(),
     val recent: List<CaptureUiModel> = emptyList(),
+    val apiBaseUrl: String = BuildConfig.API_BASE_URL,
+    val connectionState: ConnectionUiState = ConnectionUiState.Idle,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as ClipMindApp
     private val container = app.container
+    private val connectionState = MutableStateFlow<ConnectionUiState>(ConnectionUiState.Idle)
 
     val uiState: StateFlow<MainUiState> = combine(
         container.shizuku.state,
@@ -37,6 +50,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MainUiState(shizuku, capture, mode, pending = pending, recent = recent)
     }.combine(container.tokenStore.configured) { state, tokenConfigured ->
         state.copy(tokenConfigured = tokenConfigured)
+    }.combine(connectionState) { state, connection ->
+        state.copy(connectionState = connection)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     fun requestShizukuPermission() = container.shizuku.requestPermission()
@@ -48,4 +63,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopCapture() = CaptureForegroundService.stop(app)
     fun confirm(id: Long) = viewModelScope.launch { container.repository.confirm(id) }
     fun discard(id: Long) = viewModelScope.launch { container.repository.discard(id) }
+
+    fun testConnection() {
+        if (connectionState.value == ConnectionUiState.Checking) return
+        connectionState.value = ConnectionUiState.Checking
+        viewModelScope.launch {
+            connectionState.value = container.healthChecker.check().toConnectionUiState()
+        }
+    }
+}
+
+internal fun HealthCheckResult.toConnectionUiState(): ConnectionUiState = when (this) {
+    HealthCheckResult.Success -> ConnectionUiState.Connected
+    is HealthCheckResult.Failure -> ConnectionUiState.Failed(reason)
 }

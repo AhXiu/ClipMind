@@ -9,7 +9,8 @@
 - minSdk 26，targetSdk/compileSdk 35
 
 ```bash
-# 当前 Debug 默认连接 BOE 测试服务：http://10.37.228.188:8080/
+# `clipmind.baseUrl` 是构建时的必传/覆盖参数，URL 必须以 / 结尾；未提供时构建脚本回退到不可用的 https://example.invalid/
+# 本仓库当前 gradle.properties 已为 BOE Debug 联调提供默认值：http://10.37.228.188:8080/
 # 正式 token 必须在应用 UI 中保存；不要通过 Gradle/BuildConfig 注入
 ./gradlew testDebugUnitTest
 ./gradlew assembleDebug
@@ -50,7 +51,7 @@ Debug Manifest 仅为当前 BOE 联调开放明文 HTTP；Release 构建不会�
 - 系统 clipboard Binder 是隐藏且随 Android/OEM 变化的接口，无法保证所有系统版本可用。失败会显式降级，不会伪装成功；UI 仍可展示服务状态，但不会采集。
 - clipboard 接口不可靠地暴露来源应用，因此 Phase 1 的自动采集 `sourceApp/sourceUrl` 为 `null`；字段保留在 outbox/API 模型供可信来源后续填充。
 - 本地过滤包括：最小长度、纯 URL、手机号、身份证、验证码、token/密钥、私钥块与来源黑名单。被过滤内容不进入数据库。
-- 自动模式写入 `READY`；确认模式写入 `PENDING_CONFIRMATION`，必须在 UI 确认或丢弃。
+- 自动模式成功写入 `READY` 后会立即调度上传；确认模式写入 `PENDING_CONFIRMATION`，在 UI 确认并成功更新为 `READY` 后也会立即调度上传。15 分钟周期任务仅作为兜底。丢弃不会触发上传。
 - `/v1/captures:batch` 使用 snake_case DTO、RFC3339 `captured_at`、`Authorization` 与基于有序 client ID 集合 SHA-256 生成的稳定 `Idempotency-Key`。响应中的 `accepted[].client_capture_id` 才会转为 `SUCCEEDED`；`filtered_reject` 转为终态 `REJECTED`，其他拒绝或未明确确认的条目进入 `RETRYABLE_ERROR` 并指数退避。
 - Room 仅持久化 `encryptedRawText`：使用 Android Keystore 内不可导出的 AES-256 密钥和 `AES/GCM/NoPadding`，每条记录生成随机 12-byte IV；密文封装版本、IV、ciphertext 与独立 tag。日志中不记录剪贴板原文。
 - 当前 Phase 1 工程从未发布，因此加密后的最终 schema 直接定义为数据库 version 1，并移除了 `fallbackToDestructiveMigration`；不存在已发布明文 schema 的静默破坏性升级路径。后续版本必须提供显式 Migration。

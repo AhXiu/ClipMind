@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
 import com.clipmind.android.shizuku.ShizukuState
+import com.clipmind.android.ui.ConnectionUiState
 import com.clipmind.android.ui.MainUiState
 import com.clipmind.android.ui.MainViewModel
 import java.text.DateFormat
@@ -83,6 +84,7 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -
                     Button(onClick = vm::stopCapture, enabled = state.captureRequested) { Text("停止采集") }
                 }
             }
+            item { ConnectionCard(state.apiBaseUrl, state.connectionState, vm) }
             item { TokenCard(state.tokenConfigured, vm) }
             item { Text("待确认 (${state.pending.size})", style = MaterialTheme.typography.titleMedium) }
             if (state.pending.isEmpty()) item { Text("暂无待确认内容") }
@@ -91,6 +93,26 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -
             if (state.recent.isEmpty()) item { Text("暂无采集记录") }
             items(state.recent, key = { "recent-${it.id}" }) { CaptureCard(it, false, vm) }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionCard(baseUrl: String, state: ConnectionUiState, vm: MainViewModel) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("后端连接", style = MaterialTheme.typography.titleMedium)
+            Text("API Base URL：$baseUrl", style = MaterialTheme.typography.bodySmall)
+            Text(when (state) {
+                ConnectionUiState.Idle -> "连接状态：尚未检查"
+                ConnectionUiState.Checking -> "连接状态：检查中…"
+                ConnectionUiState.Connected -> "连接状态：连接成功"
+                is ConnectionUiState.Failed -> "连接状态：连接失败（${state.reason}）"
+            })
+            Button(
+                onClick = vm::testConnection,
+                enabled = state != ConnectionUiState.Checking,
+            ) { Text(if (state == ConnectionUiState.Checking) "检查中…" else "测试连接") }
         }
     }
 }
@@ -143,7 +165,14 @@ private fun CaptureCard(item: CaptureUiModel, actionable: Boolean, vm: MainViewM
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(item.content, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Text("${item.state.name} · ${DateFormat.getDateTimeInstance().format(Date(item.capturedAt))}", style = MaterialTheme.typography.bodySmall)
+            Text("状态：${item.state.name}", style = MaterialTheme.typography.bodySmall)
+            Text("采集时间：${DateFormat.getDateTimeInstance().format(Date(item.capturedAt))}", style = MaterialTheme.typography.bodySmall)
+            Text("最后错误码：${item.lastErrorCode ?: "无"}", style = MaterialTheme.typography.bodySmall)
+            Text("重试次数：${item.retryCount}", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "下次重试时间：${if (item.nextRetryAt > 0) DateFormat.getDateTimeInstance().format(Date(item.nextRetryAt)) else "无"}",
+                style = MaterialTheme.typography.bodySmall,
+            )
             if (actionable) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (item.contentAvailable) Button(onClick = { vm.confirm(item.id) }) { Text("确认") }
                 Button(onClick = { vm.discard(item.id) }) { Text("丢弃") }

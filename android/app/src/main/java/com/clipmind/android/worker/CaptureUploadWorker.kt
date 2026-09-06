@@ -11,9 +11,13 @@ import com.clipmind.android.network.dto.CaptureBatchRequest
 import com.clipmind.android.network.dto.CaptureBatchResponse
 import com.clipmind.android.network.prepareUploadBatch
 import kotlin.math.min
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class CaptureUploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = uploadMutex.withLock { performUpload() }
+
+    private suspend fun performUpload(): Result {
         val app = applicationContext as ClipMindApp
         val dao = app.container.database.captureOutboxDao()
         val now = System.currentTimeMillis()
@@ -98,5 +102,9 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         val delay = min(6 * 60 * 60 * 1000L, 30_000L * (1L shl min(maxRetry - 1, 10)))
         val now = System.currentTimeMillis()
         dao.markRetryable(items.map { it.id }, now, now + delay, code)
+    }
+
+    private companion object {
+        val uploadMutex = Mutex()
     }
 }

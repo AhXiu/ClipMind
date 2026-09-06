@@ -5,6 +5,7 @@ import com.clipmind.android.domain.FilterResult
 import com.clipmind.android.domain.LocalSafetyFilter
 import com.clipmind.android.security.TextCipher
 import com.clipmind.android.security.TextCipherException
+import com.clipmind.android.worker.ImmediateUploadScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -17,17 +18,21 @@ data class CaptureUiModel(
     val contentAvailable: Boolean,
     val state: OutboxState,
     val capturedAt: Long,
+    val lastErrorCode: String?,
+    val retryCount: Int,
+    val nextRetryAt: Long,
 )
 
 class CaptureRepository(
     private val db: ClipMindDatabase,
     private val filter: LocalSafetyFilter,
     private val cipher: TextCipher,
+    private val uploadScheduler: ImmediateUploadScheduler,
 ) {
     val pending: Flow<List<CaptureUiModel>> = db.captureOutboxDao().observePendingConfirmation()
-        .map(::decryptForUi).flowOn(Dispatchers.Default)
+        .map { entities -> entities.map { it.toUiModel(cipher) } }.flowOn(Dispatchers.Default)
     val recent: Flow<List<CaptureUiModel>> = db.captureOutboxDao().observeRecent()
-        .map(::decryptForUi).flowOn(Dispatchers.Default)
+        .map { entities -> entities.map { it.toUiModel(cipher) } }.flowOn(Dispatchers.Default)
 
     suspend fun capture(rawText: String, sourceApp: String?, mode: CaptureMode, now: Long): CaptureDecision {
         when (val result = filter.evaluate(rawText, sourceApp)) {
@@ -45,22 +50,37 @@ class CaptureRepository(
             return CaptureDecision.EncryptionFailed("ENCRYPT_${e.error.name}")
         }
         val id = dao.insert(entity)
-        return if (id == -1L) CaptureDecision.Duplicate else CaptureDecision.Stored(id, state)
+        val decision = if (id == -1L) CaptureDecision.Duplicate else CaptureDecision.Stored(id, state)
+        if (shouldScheduleImmediateUpload(decision)) uploadScheduler.schedule()
+        return decision
     }
 
-    suspend fun confirm(id: Long): Boolean = db.captureOutboxDao().confirm(id, System.currentTimeMillis()) == 1
+    suspend fun confirm(id: Long): Boolean {
+        val updated = db.captureOutboxDao().confirm(id, System.currentTimeMillis()) == 1
+        if (shouldScheduleImmediateUploadAfterConfirm(updated)) uploadScheduler.schedule()
+        return updated
+    }
+
     suspend fun discard(id: Long): Boolean = db.captureOutboxDao().discard(id, System.currentTimeMillis()) == 1
+}
 
-    private fun decryptForUi(entities: List<CaptureOutboxEntity>): List<CaptureUiModel> = entities.map { entity ->
-        val text = runCatching { cipher.decrypt(entity.encryptedRawText) }.getOrNull()
-        CaptureUiModel(
-            id = entity.id,
-            content = text ?: "内容无法解密",
-            contentAvailable = text != null,
-            state = entity.state,
-            capturedAt = entity.capturedAt,
-        )
-    }
+internal fun shouldScheduleImmediateUpload(decision: CaptureDecision): Boolean =
+    decision is CaptureDecision.Stored && decision.state == OutboxState.READY
+
+internal fun shouldScheduleImmediateUploadAfterConfirm(databaseUpdated: Boolean): Boolean = databaseUpdated
+
+internal fun CaptureOutboxEntity.toUiModel(cipher: TextCipher): CaptureUiModel {
+    val text = runCatching { cipher.decrypt(encryptedRawText) }.getOrNull()
+    return CaptureUiModel(
+        id = id,
+        content = text ?: "内容无法解密",
+        contentAvailable = text != null,
+        state = state,
+        capturedAt = capturedAt,
+        lastErrorCode = lastErrorCode,
+        retryCount = retryCount,
+        nextRetryAt = nextRetryAt,
+    )
 }
 
 internal fun createEncryptedCaptureEntity(
