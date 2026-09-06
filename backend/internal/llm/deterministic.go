@@ -8,6 +8,9 @@ import (
 
 type Deterministic struct{}
 
+func (Deterministic) Name() string  { return "deterministic" }
+func (Deterministic) Model() string { return "deterministic" }
+
 func (Deterministic) Analyze(_ context.Context, text string) (Result, error) {
 	clean := strings.Join(strings.Fields(text), " ")
 	r := []rune(clean)

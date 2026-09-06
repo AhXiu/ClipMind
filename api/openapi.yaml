@@ -51,7 +51,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CardId'
       responses:
-        '200': { description: 不可变卡片版本列表 }
+        '200':
+          description: 不可变卡片版本列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CardVersion' }
   /v1/cards/{cardId}/confirm:
     post:
       parameters:
@@ -105,7 +111,7 @@ components:
           items: { $ref: '#/components/schemas/ClipEvent' }
     ClipEvent:
       type: object
-      required: [client_capture_id, raw_text, mode, captured_at]
+      required: [client_capture_id, raw_text, mode]
       additionalProperties: false
       properties:
         client_capture_id: { type: string, minLength: 1 }
@@ -118,6 +124,51 @@ components:
         source_url: { type: string }
         mode: { type: string, enum: [auto, confirm] }
         captured_at: { type: string, format: date-time }
+        client_analysis: { $ref: '#/components/schemas/ClientAnalysis' }
+    ClientAnalysis:
+      type: object
+      additionalProperties: false
+      required: [provider, model, primary_tag, interpretation, books]
+      description: 客户端 BYOK 的结构化结果；API key 不得提交到 backend。
+      properties:
+        provider: { type: string, enum: [ark, openrouter] }
+        model: { type: string, minLength: 1, maxLength: 200 }
+        primary_tag: { type: string, enum: [人文, 商业, 技术, 认知, 职场, 社会, 随笔] }
+        interpretation: { $ref: '#/components/schemas/Interpretation' }
+        books:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ClientBook' }
+    Interpretation:
+      type: object
+      additionalProperties: false
+      required: [summary, insight, action]
+      properties:
+        summary: { type: string, minLength: 1, maxLength: 2000 }
+        insight: { type: string, minLength: 1, maxLength: 4000 }
+        action: { type: string, minLength: 1, maxLength: 2000 }
+    ClientBook:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 300 }
+        author: { type: string, maxLength: 200 }
+    CardVersion:
+      type: object
+      required: [id, card_id, number, created_at, clean_text, primary_tag, interpretation, books, llm_provider, llm_model, markdown]
+      properties:
+        id: { type: string }
+        card_id: { type: string }
+        number: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        clean_text: { type: string }
+        primary_tag: { type: string }
+        interpretation: { $ref: '#/components/schemas/Interpretation' }
+        books: { type: array, items: { type: object } }
+        llm_provider: { type: string, enum: [ark, openrouter, openai, deterministic] }
+        llm_model: { type: string }
+        markdown: { type: string }
     AcceptedCapture:
       type: object
       required: [client_capture_id, capture_id, card_id]

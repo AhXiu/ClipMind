@@ -14,6 +14,7 @@ data class CaptureUploadItem(
     @SerializedName("source_url") val sourceUrl: String?,
     @SerializedName("mode") val mode: String,
     @SerializedName("captured_at") val capturedAt: String,
+    @SerializedName("client_analysis") val clientAnalysis: ClientAnalysis? = null,
 )
 
 data class CaptureBatchRequest(

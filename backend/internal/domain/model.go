@@ -3,7 +3,9 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Status string
@@ -46,22 +48,23 @@ func Transition(from, to Status) error {
 var AllowedTags = map[string]bool{"人文": true, "商业": true, "技术": true, "认知": true, "职场": true, "社会": true, "随笔": true}
 
 type Capture struct {
-	ID              string        `json:"id"`
-	ClientCaptureID string        `json:"client_capture_id"`
-	Text            string        `json:"text,omitempty"`
-	TextSHA256      string        `json:"text_sha256,omitempty"`
-	SourceApp       string        `json:"source_app,omitempty"`
-	SourceURL       string        `json:"source_url,omitempty"`
-	Mode            string        `json:"mode"`
-	CapturedAt      time.Time     `json:"captured_at"`
-	CreatedAt       time.Time     `json:"created_at"`
-	Status          Status        `json:"status"`
-	StatusHistory   []StatusEvent `json:"status_history"`
-	BackupPath      string        `json:"backup_path,omitempty"`
-	RejectReason    string        `json:"reject_reason,omitempty"`
-	CardID          string        `json:"card_id,omitempty"`
-	Attempts        int           `json:"attempts"`
-	LastError       string        `json:"last_error,omitempty"`
+	ID              string          `json:"id"`
+	ClientCaptureID string          `json:"client_capture_id"`
+	Text            string          `json:"text,omitempty"`
+	TextSHA256      string          `json:"text_sha256,omitempty"`
+	SourceApp       string          `json:"source_app,omitempty"`
+	SourceURL       string          `json:"source_url,omitempty"`
+	Mode            string          `json:"mode"`
+	CapturedAt      time.Time       `json:"captured_at"`
+	CreatedAt       time.Time       `json:"created_at"`
+	Status          Status          `json:"status"`
+	StatusHistory   []StatusEvent   `json:"status_history"`
+	BackupPath      string          `json:"backup_path,omitempty"`
+	RejectReason    string          `json:"reject_reason,omitempty"`
+	CardID          string          `json:"card_id,omitempty"`
+	Attempts        int             `json:"attempts"`
+	LastError       string          `json:"last_error,omitempty"`
+	ClientAnalysis  *ClientAnalysis `json:"client_analysis,omitempty"`
 }
 
 func (c Capture) String() string {
@@ -97,6 +100,56 @@ type BookCandidate struct {
 	Verified       bool   `json:"verified"`
 }
 
+type ClientBook struct {
+	Title  string `json:"title"`
+	Author string `json:"author,omitempty"`
+}
+
+type ClientAnalysis struct {
+	Provider       string         `json:"provider"`
+	Model          string         `json:"model"`
+	PrimaryTag     string         `json:"primary_tag"`
+	Interpretation Interpretation `json:"interpretation"`
+	Books          []ClientBook   `json:"books"`
+}
+
+func ValidateClientAnalysis(a ClientAnalysis) error {
+	if a.Provider != "ark" && a.Provider != "openrouter" {
+		return errors.New("client_analysis.provider must be ark or openrouter")
+	}
+	if blankOrLong(a.Model, 200) {
+		return errors.New("client_analysis.model must be non-empty and at most 200 characters")
+	}
+	if !AllowedTags[a.PrimaryTag] {
+		return errors.New("client_analysis.primary_tag is invalid")
+	}
+	if blankOrLong(a.Interpretation.Summary, 2000) {
+		return errors.New("client_analysis.interpretation.summary must be non-empty and at most 2000 characters")
+	}
+	if blankOrLong(a.Interpretation.Insight, 4000) {
+		return errors.New("client_analysis.interpretation.insight must be non-empty and at most 4000 characters")
+	}
+	if blankOrLong(a.Interpretation.Action, 2000) {
+		return errors.New("client_analysis.interpretation.action must be non-empty and at most 2000 characters")
+	}
+	if len(a.Books) > 10 {
+		return errors.New("client_analysis.books must contain at most 10 items")
+	}
+	for _, book := range a.Books {
+		if blankOrLong(book.Title, 300) {
+			return errors.New("client_analysis book title must be non-empty and at most 300 characters")
+		}
+		if utf8.RuneCountInString(book.Author) > 200 {
+			return errors.New("client_analysis book author must be at most 200 characters")
+		}
+	}
+	return nil
+}
+
+func blankOrLong(value string, maximum int) bool {
+	return strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > maximum
+}
+
 type CardVersion struct {
 	ID             string          `json:"id"`
 	CardID         string          `json:"card_id"`
@@ -106,6 +159,8 @@ type CardVersion struct {
 	PrimaryTag     string          `json:"primary_tag"`
 	Interpretation Interpretation  `json:"interpretation"`
 	Books          []BookCandidate `json:"books"`
+	LLMProvider    string          `json:"llm_provider"`
+	LLMModel       string          `json:"llm_model"`
 	Markdown       string          `json:"markdown"`
 }
 

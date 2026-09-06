@@ -43,9 +43,16 @@ func main() {
 		log.Printf("backup initialization failed: %v", e)
 		os.Exit(1)
 	}
-	var provider llm.Provider = llm.Deterministic{}
-	if cfg.LLMProvider == "openai" {
-		provider = llm.NewOpenAI(cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.LLMTimeout)
+	var provider llm.Provider
+	if cfg.LLMProvider == "deterministic" {
+		provider = llm.Deterministic{}
+	} else {
+		compatible := llm.NewOpenAICompatible(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMTimeout)
+		if cfg.LLMProvider == "openrouter" {
+			compatible.HTTPReferer = cfg.OpenRouterHTTPReferer
+			compatible.Title = cfg.OpenRouterTitle
+		}
+		provider = compatible
 	}
 	m := metrics.New()
 	capture := service.New(repo, security.NewSafeFilter(256*1024), backup)

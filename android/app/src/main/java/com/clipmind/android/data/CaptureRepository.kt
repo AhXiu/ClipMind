@@ -32,6 +32,7 @@ class CaptureRepository(
     private val filter: LocalSafetyFilter,
     private val cipher: TextCipher,
     private val uploadScheduler: ImmediateUploadScheduler,
+    private val settings: UserSettings,
 ) {
     val pending: Flow<List<CaptureUiModel>> = db.captureOutboxDao().observePendingConfirmation()
         .map { entities -> entities.map { it.toUiModel(cipher) } }.flowOn(Dispatchers.Default)
@@ -49,7 +50,8 @@ class CaptureRepository(
         if (dao.hashExistsSince(hash, now - 24 * 60 * 60 * 1000L)) return CaptureDecision.Duplicate
         val state = if (mode == CaptureMode.AUTO) OutboxState.READY else OutboxState.PENDING_CONFIRMATION
         val entity = try {
-            createEncryptedCaptureEntity(normalized, hash, sourceApp, null, mode, state, now, cipher)
+            val ai = settings.captureAiConfiguration()
+            createEncryptedCaptureEntity(normalized, hash, sourceApp, null, mode, state, now, cipher, ai)
         } catch (e: TextCipherException) {
             return CaptureDecision.EncryptionFailed("ENCRYPT_${e.error.name}")
         }
@@ -100,6 +102,7 @@ internal fun createEncryptedCaptureEntity(
     state: OutboxState,
     now: Long,
     cipher: TextCipher,
+    aiConfiguration: AiCaptureConfiguration = AiCaptureConfiguration(AiMode.SERVER_ARK, AiDefaults.ARK_MODEL),
 ): CaptureOutboxEntity = CaptureOutboxEntity(
     clientCaptureId = UUID.randomUUID().toString(),
     encryptedRawText = cipher.encrypt(plainText),
@@ -110,6 +113,8 @@ internal fun createEncryptedCaptureEntity(
     state = state,
     capturedAt = now,
     updatedAt = now,
+    aiProvider = aiConfiguration.mode.takeIf { it.isByok }?.providerId,
+    aiModel = aiConfiguration.model,
 )
 
 sealed interface CaptureDecision {

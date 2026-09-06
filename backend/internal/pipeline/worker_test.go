@@ -284,3 +284,70 @@ func TestRunOnceRecoversStaleSyncingAndRetries(t *testing.T) {
 		t.Fatal("stale syncing recovery metric not incremented")
 	}
 }
+
+type countingLLM struct{ calls int }
+
+func (p *countingLLM) Analyze(context.Context, string) (llm.Result, error) {
+	p.calls++
+	return llm.Result{}, errors.New("default provider must be skipped")
+}
+
+type countingBooks struct{ calls int }
+
+func (v *countingBooks) Verify(_ context.Context, candidates []domain.BookCandidate) []domain.BookCandidate {
+	v.calls++
+	for i := range candidates {
+		candidates[i].Verified = true
+		candidates[i].OpenLibraryKey = "/works/OL1W"
+	}
+	return candidates
+}
+
+func TestClientAnalysisSkipsDefaultProviderAndRecordsSource(t *testing.T) {
+	repo, err := store.OpenFile(filepath.Join(t.TempDir(), "store.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := seedCapture(t, repo, "confirm", "byok")
+	capture.ClientAnalysis = &domain.ClientAnalysis{
+		Provider: "openrouter", Model: "anthropic/model", PrimaryTag: "认知",
+		Interpretation: domain.Interpretation{Summary: "客户端总结", Insight: "客户端洞察", Action: "客户端行动"},
+		Books:          []domain.ClientBook{{Title: "Thinking", Author: "Author"}},
+	}
+	if err = repo.UpdateCapture(capture); err != nil {
+		t.Fatal(err)
+	}
+	provider := &countingLLM{}
+	verifier := &countingBooks{}
+	worker := Worker{Repo: repo, LLM: provider, Books: verifier, Metrics: metrics.New()}
+	if err = worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 0 || verifier.calls != 1 {
+		t.Fatalf("default calls=%d, book verifier calls=%d", provider.calls, verifier.calls)
+	}
+	versions, err := repo.ListVersions(capture.CardID)
+	if err != nil || len(versions) != 1 {
+		t.Fatalf("versions=%d err=%v", len(versions), err)
+	}
+	version := versions[0]
+	if version.LLMProvider != "openrouter" || version.LLMModel != "anthropic/model" || version.Interpretation.Summary != "客户端总结" || len(version.Books) != 1 || !version.Books[0].Verified {
+		t.Fatalf("unexpected client analysis version: %+v", version)
+	}
+}
+
+func TestDeterministicVersionRecordsSource(t *testing.T) {
+	repo, err := store.OpenFile(filepath.Join(t.TempDir(), "store.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := seedCapture(t, repo, "confirm", "source")
+	worker := Worker{Repo: repo, LLM: llm.Deterministic{}, Books: noBooks{}, Metrics: metrics.New()}
+	if err = worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	versions, _ := repo.ListVersions(capture.CardID)
+	if len(versions) != 1 || versions[0].LLMProvider != "deterministic" || versions[0].LLMModel != "deterministic" {
+		t.Fatalf("deterministic source missing: %+v", versions)
+	}
+}

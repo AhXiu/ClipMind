@@ -14,13 +14,14 @@ import (
 )
 
 type CaptureInput struct {
-	ClientCaptureID string    `json:"client_capture_id"`
-	RawText         string    `json:"raw_text"`
-	TextSHA256      string    `json:"text_sha256,omitempty"`
-	SourceApp       string    `json:"source_app,omitempty"`
-	SourceURL       string    `json:"source_url,omitempty"`
-	Mode            string    `json:"mode"`
-	CapturedAt      time.Time `json:"captured_at"`
+	ClientCaptureID string                 `json:"client_capture_id"`
+	RawText         string                 `json:"raw_text"`
+	TextSHA256      string                 `json:"text_sha256,omitempty"`
+	SourceApp       string                 `json:"source_app,omitempty"`
+	SourceURL       string                 `json:"source_url,omitempty"`
+	Mode            string                 `json:"mode"`
+	CapturedAt      time.Time              `json:"captured_at"`
+	ClientAnalysis  *domain.ClientAnalysis `json:"client_analysis,omitempty"`
 }
 type Accepted struct {
 	ClientCaptureID string `json:"client_capture_id"`
@@ -116,6 +117,12 @@ func (s *Service) Ingest(key string, items []CaptureInput) (BatchResult, error) 
 			out.Rejected = append(out.Rejected, Rejected{ClientCaptureID: in.ClientCaptureID, Code: "invalid_mode", Message: "mode must be auto or confirm"})
 			continue
 		}
+		if in.ClientAnalysis != nil {
+			if err := domain.ValidateClientAnalysis(*in.ClientAnalysis); err != nil {
+				out.Rejected = append(out.Rejected, Rejected{ClientCaptureID: in.ClientCaptureID, Code: "invalid_client_analysis", Message: err.Error()})
+				continue
+			}
+		}
 		if in.TextSHA256 != "" {
 			sum := sha256.Sum256([]byte(in.RawText))
 			if in.TextSHA256 != hex.EncodeToString(sum[:]) {
@@ -144,7 +151,7 @@ func (s *Service) Ingest(key string, items []CaptureInput) (BatchResult, error) 
 			cleanup()
 			return out, e
 		}
-		c := domain.Capture{ID: cid, ClientCaptureID: in.ClientCaptureID, Text: clean, TextSHA256: in.TextSHA256, SourceApp: in.SourceApp, SourceURL: in.SourceURL, Mode: in.Mode, CapturedAt: captured, CreatedAt: now, Status: domain.StatusReceived, StatusHistory: []domain.StatusEvent{{Status: domain.StatusReceived, At: now}}, CardID: cardID, BackupPath: path}
+		c := domain.Capture{ID: cid, ClientCaptureID: in.ClientCaptureID, Text: clean, TextSHA256: in.TextSHA256, SourceApp: in.SourceApp, SourceURL: in.SourceURL, Mode: in.Mode, CapturedAt: captured, CreatedAt: now, Status: domain.StatusReceived, StatusHistory: []domain.StatusEvent{{Status: domain.StatusReceived, At: now}}, CardID: cardID, BackupPath: path, ClientAnalysis: in.ClientAnalysis}
 		if e = c.Move(domain.StatusFilteredPass, now); e != nil {
 			cleanup()
 			_ = s.Backup.Delete(path)

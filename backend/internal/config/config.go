@@ -5,20 +5,45 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
+const (
+	DefaultArkBaseURL    = "https://ark.cn-beijing.volces.com/api/v3"
+	DefaultArkModel      = "ep-20260306164116-j9fgc"
+	OpenRouterBaseURL    = "https://openrouter.ai/api/v1"
+	DefaultOpenAIBaseURL = "https://api.openai.com/v1"
+	DefaultOpenAIModel   = "gpt-4o-mini"
+)
+
 type Config struct {
-	Addr, DataDir, VaultDir, AuthToken, Environment       string
-	AuthDisabled                                          bool
-	BackupKey                                             []byte
-	LLMProvider, OpenAIBaseURL, OpenAIAPIKey, OpenAIModel string
-	LLMTimeout                                            time.Duration
-	WorkerInterval                                        time.Duration
+	Addr, DataDir, VaultDir, AuthToken, Environment string
+	AuthDisabled                                    bool
+	BackupKey                                       []byte
+	LLMProvider                                     string
+	LLMBaseURL                                      string
+	LLMAPIKey                                       string
+	LLMModel                                        string
+	OpenRouterHTTPReferer                           string
+	OpenRouterTitle                                 string
+	LLMTimeout                                      time.Duration
+	WorkerInterval                                  time.Duration
 }
 
 func Load() (Config, error) {
-	c := Config{Addr: get("CLIPMIND_ADDR", ":8080"), DataDir: get("CLIPMIND_DATA_DIR", "./data"), VaultDir: get("CLIPMIND_VAULT_DIR", "./vault"), Environment: get("CLIPMIND_ENV", "development"), AuthToken: os.Getenv("CLIPMIND_AUTH_TOKEN"), LLMProvider: get("CLIPMIND_LLM_PROVIDER", "deterministic"), OpenAIBaseURL: get("OPENAI_BASE_URL", "https://api.openai.com/v1"), OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: get("OPENAI_MODEL", "gpt-4o-mini"), LLMTimeout: duration("CLIPMIND_LLM_TIMEOUT", 20*time.Second), WorkerInterval: duration("CLIPMIND_WORKER_INTERVAL", time.Second)}
+	c := Config{
+		Addr:                  get("CLIPMIND_ADDR", ":8080"),
+		DataDir:               get("CLIPMIND_DATA_DIR", "./data"),
+		VaultDir:              get("CLIPMIND_VAULT_DIR", "./vault"),
+		Environment:           get("CLIPMIND_ENV", "development"),
+		AuthToken:             os.Getenv("CLIPMIND_AUTH_TOKEN"),
+		LLMProvider:           get("CLIPMIND_LLM_PROVIDER", "ark"),
+		OpenRouterHTTPReferer: os.Getenv("OPENROUTER_HTTP_REFERER"),
+		OpenRouterTitle:       os.Getenv("OPENROUTER_X_TITLE"),
+		LLMTimeout:            duration("CLIPMIND_LLM_TIMEOUT", 20*time.Second),
+		WorkerInterval:        duration("CLIPMIND_WORKER_INTERVAL", time.Second),
+	}
 	c.AuthDisabled = boolean("CLIPMIND_AUTH_DISABLED", c.Environment != "production")
 	if s := os.Getenv("CLIPMIND_BACKUP_KEY"); s != "" {
 		b, err := base64.StdEncoding.DecodeString(s)
@@ -27,11 +52,34 @@ func Load() (Config, error) {
 		}
 		c.BackupKey = b
 	}
-	if c.LLMProvider != "deterministic" && c.LLMProvider != "openai" {
-		return c, errors.New("CLIPMIND_LLM_PROVIDER must be deterministic or openai")
+
+	switch c.LLMProvider {
+	case "deterministic":
+		c.LLMModel = "deterministic"
+	case "ark":
+		c.LLMBaseURL = get("ARK_BASE_URL", DefaultArkBaseURL)
+		c.LLMAPIKey = os.Getenv("ARK_API_KEY")
+		c.LLMModel = get("ARK_MODEL", DefaultArkModel)
+	case "openrouter":
+		// This URL is deliberately not configurable: uploaded or operator-supplied
+		// arbitrary URLs would turn the provider client into an SSRF primitive.
+		c.LLMBaseURL = OpenRouterBaseURL
+		c.LLMAPIKey = os.Getenv("OPENROUTER_API_KEY")
+		c.LLMModel = os.Getenv("OPENROUTER_MODEL")
+	case "openai":
+		c.LLMBaseURL = get("OPENAI_BASE_URL", DefaultOpenAIBaseURL)
+		c.LLMAPIKey = os.Getenv("OPENAI_API_KEY")
+		c.LLMModel = get("OPENAI_MODEL", DefaultOpenAIModel)
+	default:
+		return c, errors.New("CLIPMIND_LLM_PROVIDER must be ark, openrouter, openai, or deterministic")
 	}
-	if c.LLMProvider == "openai" && c.OpenAIAPIKey == "" {
-		return c, errors.New("OPENAI_API_KEY is required for openai provider")
+	if c.LLMProvider != "deterministic" {
+		if c.LLMAPIKey == "" {
+			return c, errors.New("API key is required for selected LLM provider")
+		}
+		if strings.TrimSpace(c.LLMModel) == "" || len([]rune(c.LLMModel)) > 200 {
+			return c, errors.New("model for selected LLM provider must be non-empty and at most 200 characters")
+		}
 	}
 	if c.Environment == "production" {
 		if len(c.BackupKey) != 32 {
@@ -46,6 +94,7 @@ func Load() (Config, error) {
 	}
 	return c, nil
 }
+
 func get(k, d string) string {
 	if v := os.Getenv(k); v != "" {
 		return v

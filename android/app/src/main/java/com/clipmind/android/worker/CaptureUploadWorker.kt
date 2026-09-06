@@ -7,26 +7,32 @@ import com.clipmind.android.ClipMindApp
 import com.clipmind.android.data.CaptureOutboxDao
 import com.clipmind.android.data.CaptureOutboxEntity
 import com.clipmind.android.network.BatchRequestMetadata
+import com.clipmind.android.network.ByokAnalysisResult
+import com.clipmind.android.network.dto.AcceptedCapture
 import com.clipmind.android.network.dto.CaptureBatchRequest
 import com.clipmind.android.network.dto.CaptureBatchResponse
-import com.clipmind.android.network.dto.AcceptedCapture
 import com.clipmind.android.network.prepareUploadBatch
-import kotlin.math.min
+import com.clipmind.android.security.TextCipherException
+import com.google.gson.Gson
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.min
 
 class CaptureUploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = uploadMutex.withLock { performUpload() }
 
     private suspend fun performUpload(): Result {
         val app = applicationContext as ClipMindApp
-        val dao = app.container.database.captureOutboxDao()
+        val container = app.container
+        val dao = container.database.captureOutboxDao()
         val now = System.currentTimeMillis()
         dao.recoverStaleUploads(now - 10 * 60 * 1000L, now)
         val candidates = dao.eligibleBatch(now, 50)
         if (candidates.isEmpty()) return Result.success()
 
-        val prepared = prepareUploadBatch(candidates, app.container.textCipher)
+        val analysisReady = prepareClientAnalysis(candidates, dao, container)
+        if (analysisReady.isEmpty()) return Result.success()
+        val prepared = prepareUploadBatch(analysisReady, container.textCipher)
         prepared.failures.groupBy { it.errorCode }.forEach { (code, failures) ->
             dao.markDecryptionFailed(failures.map { it.entity.id }, System.currentTimeMillis(), code)
         }
@@ -36,9 +42,9 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         dao.markUploading(batch.map { it.id }, now)
         val clientIds = batch.map { it.clientCaptureId }
         val idempotencyKey = BatchRequestMetadata.idempotencyKey(clientIds)
-        val authorization = BatchRequestMetadata.authorizationHeader(app.container.tokenStore.readToken().orEmpty())
+        val authorization = BatchRequestMetadata.authorizationHeader(container.tokenStore.readToken().orEmpty())
         return try {
-            val response = app.container.api.upload(
+            val response = container.api.upload(
                 authorization = authorization,
                 idempotencyKey = idempotencyKey,
                 request = CaptureBatchRequest(prepared.uploads.map { it.item }),
@@ -55,6 +61,56 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
+    private suspend fun prepareClientAnalysis(
+        candidates: List<CaptureOutboxEntity>,
+        dao: CaptureOutboxDao,
+        container: com.clipmind.android.AppContainer,
+    ): List<CaptureOutboxEntity> {
+        val ready = mutableListOf<CaptureOutboxEntity>()
+        for (entity in candidates) {
+            if (!shouldInvokeClientAnalysis(entity)) {
+                ready += entity
+                continue
+            }
+            val key = container.apiKeyStore.readForAuthorization()
+            if (key == null) {
+                markAnalysisError(dao, entity, "BYOK_KEY_MISSING")
+                continue
+            }
+            val model = entity.aiModel.orEmpty()
+            if (model.isBlank()) {
+                markAnalysisError(dao, entity, "BYOK_MODEL_MISSING")
+                continue
+            }
+            val plainText = try {
+                container.textCipher.decrypt(entity.encryptedRawText)
+            } catch (e: TextCipherException) {
+                dao.markDecryptionFailed(listOf(entity.id), System.currentTimeMillis(), "DECRYPT_${e.error.name}")
+                continue
+            }
+            when (val result = container.clientAnalyzer.analyze(entity.aiProvider!!, model, key, plainText)) {
+                is ByokAnalysisResult.Failure -> markAnalysisError(dao, entity, result.code.name)
+                is ByokAnalysisResult.Success -> {
+                    val encrypted = try {
+                        container.textCipher.encrypt(Gson().toJson(result.analysis))
+                    } catch (e: TextCipherException) {
+                        markAnalysisError(dao, entity, "BYOK_ENCRYPTION")
+                        continue
+                    }
+                    if (dao.cacheClientAnalysis(entity.id, encrypted, System.currentTimeMillis()) == 1) {
+                        ready += entity.copy(encryptedClientAnalysis = encrypted)
+                    }
+                }
+            }
+        }
+        return ready
+    }
+
+    private suspend fun markAnalysisError(dao: CaptureOutboxDao, entity: CaptureOutboxEntity, code: String) {
+        val now = System.currentTimeMillis()
+        dao.markAnalysisError(entity.id, now, now + ANALYSIS_RETRY_DELAY_MS, code)
+    }
+
     private suspend fun handleSuccessfulResponse(
         dao: CaptureOutboxDao,
         batch: List<CaptureOutboxEntity>,
@@ -68,16 +124,11 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         val acceptedMappings = acceptedCardMappings(batch, body)
         val acceptedIds = acceptedMappings.map { it.clientCaptureId }.toSet()
         val succeededAt = System.currentTimeMillis()
-        acceptedMappings.forEach { accepted ->
-            dao.markSucceeded(accepted.clientCaptureId, accepted.cardId, succeededAt)
-        }
+        acceptedMappings.forEach { accepted -> dao.markSucceeded(accepted.clientCaptureId, accepted.cardId, succeededAt) }
 
-        val rejected = body.rejected
-            .filter { it.clientCaptureId in batchByClientId && it.clientCaptureId !in acceptedIds }
-        val terminalRejectedIds = rejected
-            .filter { it.code.equals("filtered_reject", ignoreCase = true) }
-            .map { it.clientCaptureId }
-            .toSet()
+        val rejected = body.rejected.filter { it.clientCaptureId in batchByClientId && it.clientCaptureId !in acceptedIds }
+        val terminalRejectedIds = rejected.filter { it.code.equals("filtered_reject", ignoreCase = true) }
+            .map { it.clientCaptureId }.toSet()
         if (terminalRejectedIds.isNotEmpty()) {
             dao.markRejected(terminalRejectedIds.toList(), System.currentTimeMillis(), "filtered_reject")
         }
@@ -92,7 +143,6 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
                     markRetry(dao, items, "REJECTED_$code")
                 }
             }
-
         val explicitlyHandled = acceptedIds + terminalRejectedIds + rejected.map { it.clientCaptureId }
         val missing = batch.filterNot { it.clientCaptureId in explicitlyHandled }
         if (missing.isNotEmpty()) {
@@ -111,8 +161,12 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
 
     private companion object {
         val uploadMutex = Mutex()
+        const val ANALYSIS_RETRY_DELAY_MS = 6 * 60 * 60 * 1000L
     }
 }
+
+internal fun shouldInvokeClientAnalysis(entity: CaptureOutboxEntity): Boolean =
+    entity.aiProvider != null && entity.encryptedClientAnalysis == null
 
 internal fun acceptedCardMappings(
     batch: List<CaptureOutboxEntity>,

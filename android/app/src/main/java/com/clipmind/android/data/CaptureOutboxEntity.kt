@@ -25,4 +25,7 @@ data class CaptureOutboxEntity(
     val serverCardId: String? = null,
     val serverCardStatus: String? = null,
     val serverLastError: String? = null,
+    val aiProvider: String? = null,
+    val aiModel: String? = null,
+    val encryptedClientAnalysis: String? = null,
 )

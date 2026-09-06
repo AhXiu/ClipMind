@@ -36,12 +36,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.clipmind.android.data.AiMode
 import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
 import com.clipmind.android.service.CaptureProcessingDiagnostic
 import com.clipmind.android.service.toUiDescription
 import com.clipmind.android.shizuku.ClipboardDiagnosticUiState
 import com.clipmind.android.shizuku.ShizukuState
+import com.clipmind.android.ui.AiConnectionUiState
 import com.clipmind.android.ui.CardOperationUiState
 import com.clipmind.android.ui.ConnectionUiState
 import com.clipmind.android.ui.MainUiState
@@ -97,6 +99,7 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -
             }
             item { ConnectionCard(state.apiBaseUrl, state.connectionState, vm) }
             item { TokenCard(state.tokenConfigured, vm) }
+            item { AiSettingsCard(state, vm) }
             item { Text("待本地确认上传 (${state.pending.size})", style = MaterialTheme.typography.titleMedium) }
             if (state.pending.isEmpty()) item { Text("暂无待本地确认上传内容") }
             items(state.pending, key = { "pending-${it.id}" }) {
@@ -151,6 +154,78 @@ private fun TokenCard(configured: Boolean, vm: MainViewModel) {
                 Button(onClick = { vm.clearToken(); token = "" }, enabled = configured) { Text("清除") }
             }
             Text("Token 使用 Keystore 加密后存储，不在界面回显。", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun AiSettingsCard(state: MainUiState, vm: MainViewModel) {
+    var apiKey by remember { mutableStateOf("") }
+    var model by remember(state.aiMode) {
+        mutableStateOf(if (state.aiMode == AiMode.BYOK_OPENROUTER) state.openRouterModel else state.arkModel)
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("AI 模式", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(state.aiMode == AiMode.SERVER_ARK, { vm.setAiMode(AiMode.SERVER_ARK) }, { Text("SERVER_ARK") })
+                FilterChip(state.aiMode == AiMode.BYOK_ARK, { vm.setAiMode(AiMode.BYOK_ARK) }, { Text("BYOK_ARK") })
+            }
+            FilterChip(
+                state.aiMode == AiMode.BYOK_OPENROUTER,
+                { vm.setAiMode(AiMode.BYOK_OPENROUTER) },
+                { Text("BYOK_OPENROUTER") },
+            )
+            if (state.aiMode == AiMode.SERVER_ARK) {
+                Text("由 ClipMind 后端分析，手机无需 Provider Key。默认模型：ep-20260306164116-j9fgc")
+            } else {
+                Text(
+                    if (state.aiMode == AiMode.BYOK_ARK)
+                        "固定服务：https://ark.cn-beijing.volces.com/api/v3"
+                    else "固定服务：https://openrouter.ai/api/v1",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("模型 ID") },
+                    singleLine = true,
+                )
+                Button(
+                    onClick = {
+                        if (state.aiMode == AiMode.BYOK_ARK) vm.setArkModel(model)
+                        else vm.setOpenRouterModel(model)
+                    },
+                    enabled = model.isNotBlank(),
+                ) { Text("保存模型 ID") }
+                Text("API Key：${if (state.apiKeyConfigured) "已配置" else "未配置"}")
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("API Key（仅用于覆盖）") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { if (vm.saveApiKey(apiKey)) apiKey = "" }, enabled = apiKey.isNotBlank()) {
+                        Text(if (state.apiKeyConfigured) "覆盖" else "保存")
+                    }
+                    Button(onClick = { vm.clearApiKey(); apiKey = "" }, enabled = state.apiKeyConfigured) { Text("清除") }
+                }
+                Text("Key 仅在本机通过 Android Keystore 加密保存，不会发送给 ClipMind 后端；卸载应用后会丢失。", style = MaterialTheme.typography.bodySmall)
+                Button(
+                    onClick = vm::testModelConnection,
+                    enabled = state.aiConnectionState != AiConnectionUiState.Checking,
+                ) { Text(if (state.aiConnectionState == AiConnectionUiState.Checking) "测试中…" else "测试模型连接") }
+                Text(when (val result = state.aiConnectionState) {
+                    AiConnectionUiState.Idle -> "模型连接：尚未测试"
+                    AiConnectionUiState.Checking -> "模型连接：测试中…"
+                    AiConnectionUiState.Success -> "模型连接：成功"
+                    is AiConnectionUiState.Failed -> "模型连接：失败（${result.errorCode}）"
+                }, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

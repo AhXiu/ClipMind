@@ -7,8 +7,10 @@ import com.clipmind.android.data.ClipMindDatabase
 import com.clipmind.android.data.UserSettings
 import com.clipmind.android.domain.LocalSafetyFilter
 import com.clipmind.android.network.CaptureApi
+import com.clipmind.android.network.FixedProviderClient
 import com.clipmind.android.network.HealthChecker
 import com.clipmind.android.security.AndroidKeystoreTextCipher
+import com.clipmind.android.security.KeystoreApiKeySecretStore
 import com.clipmind.android.security.SecureTokenStore
 import com.clipmind.android.service.CaptureProcessingDiagnostics
 import com.clipmind.android.shizuku.ShizukuController
@@ -44,6 +46,11 @@ class AppContainer(app: Application) {
             store.saveToken(BuildConfig.DEBUG_AUTH_TOKEN)
         }
     }
+    val apiKeyStore = KeystoreApiKeySecretStore(
+        app.getSharedPreferences("secure_provider_key", Application.MODE_PRIVATE),
+        AndroidKeystoreTextCipher("clipmind_byok_api_key_v1"),
+    )
+    val clientAnalyzer = FixedProviderClient()
     private val immediateUploadScheduler = WorkManagerImmediateUploadScheduler(app)
     val api: CaptureApi = Retrofit.Builder()
         .baseUrl(BuildConfig.API_BASE_URL)
@@ -58,6 +65,7 @@ class AppContainer(app: Application) {
         )),
         textCipher,
         immediateUploadScheduler,
+        settings,
     )
     val cardRepository = CardRepository(api, database.captureOutboxDao(), tokenStore)
     val healthChecker = HealthChecker(api)

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"clipmind/backend/internal/domain"
 	"clipmind/backend/internal/security"
 	"clipmind/backend/internal/store"
 	"crypto/sha256"
@@ -167,5 +168,68 @@ func TestConcurrentSameIdempotencyKeyReturnsSameReceipt(t *testing.T) {
 	}
 	if got := repo.PersistCount(); got != 1 {
 		t.Fatalf("repository persist count=%d, want 1", got)
+	}
+}
+
+func validClientAnalysis() *domain.ClientAnalysis {
+	return &domain.ClientAnalysis{
+		Provider: "openrouter", Model: "vendor/model", PrimaryTag: "技术",
+		Interpretation: domain.Interpretation{Summary: "总结", Insight: "洞察", Action: "行动"},
+		Books:          []domain.ClientBook{{Title: "The Go Programming Language", Author: "Alan Donovan"}},
+	}
+}
+
+func TestClientAnalysisAcceptedPersistedAndInvalidItemRejected(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := store.OpenFile(filepath.Join(dir, "store.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := security.NewEncryptedFileBackup(filepath.Join(dir, "backup"), bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(repo, security.NewSafeFilter(1000), backup)
+	invalid := validClientAnalysis()
+	invalid.Provider = "openai"
+	result, err := svc.Ingest("client-analysis", []CaptureInput{
+		{ClientCaptureID: "valid-analysis", RawText: "safe", Mode: "confirm", ClientAnalysis: validClientAnalysis()},
+		{ClientCaptureID: "invalid-analysis", RawText: "safe", Mode: "confirm", ClientAnalysis: invalid},
+		{ClientCaptureID: "legacy", RawText: "safe legacy request", Mode: "auto"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Accepted) != 2 || len(result.Rejected) != 1 || result.Rejected[0].Code != "invalid_client_analysis" {
+		t.Fatalf("unexpected item results: %+v", result)
+	}
+	stored, err := repo.GetCapture(result.Accepted[0].CaptureID)
+	if err != nil || stored.ClientAnalysis == nil || stored.ClientAnalysis.Model != "vendor/model" {
+		t.Fatalf("client analysis not persisted: capture=%+v err=%v", stored, err)
+	}
+}
+
+func TestClientAnalysisLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*domain.ClientAnalysis)
+	}{
+		{"empty model", func(a *domain.ClientAnalysis) { a.Model = " " }},
+		{"long model", func(a *domain.ClientAnalysis) { a.Model = strings.Repeat("m", 201) }},
+		{"bad tag", func(a *domain.ClientAnalysis) { a.PrimaryTag = "其他" }},
+		{"empty summary", func(a *domain.ClientAnalysis) { a.Interpretation.Summary = "" }},
+		{"long insight", func(a *domain.ClientAnalysis) { a.Interpretation.Insight = strings.Repeat("洞", 4001) }},
+		{"too many books", func(a *domain.ClientAnalysis) { a.Books = make([]domain.ClientBook, 11) }},
+		{"empty title", func(a *domain.ClientAnalysis) { a.Books[0].Title = "" }},
+		{"long author", func(a *domain.ClientAnalysis) { a.Books[0].Author = strings.Repeat("a", 201) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			a := validClientAnalysis()
+			test.edit(a)
+			if err := domain.ValidateClientAnalysis(*a); err == nil {
+				t.Fatal("expected validation failure")
+			}
+		})
 	}
 }

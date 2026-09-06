@@ -7,6 +7,14 @@ services:
       CLIPMIND_ADDR: :8080
       CLIPMIND_DATA_DIR: /data
       CLIPMIND_VAULT_DIR: /vault
+      CLIPMIND_LLM_PROVIDER: ${CLIPMIND_LLM_PROVIDER:-ark}
+      ARK_API_KEY: ${ARK_API_KEY:-}
+      ARK_MODEL: ${ARK_MODEL:-ep-20260306164116-j9fgc}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
     volumes:
       - clipmind-data:/data
       - clipmind-vault:/vault

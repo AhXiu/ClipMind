@@ -2,8 +2,10 @@ package com.clipmind.android.network
 
 import com.clipmind.android.data.CaptureOutboxEntity
 import com.clipmind.android.network.dto.CaptureUploadItem
+import com.clipmind.android.network.dto.ClientAnalysis
 import com.clipmind.android.security.TextCipher
 import com.clipmind.android.security.TextCipherException
+import com.google.gson.Gson
 import java.time.Instant
 
 data class PreparedUpload(
@@ -30,7 +32,10 @@ internal fun prepareUploadBatch(
     entities.forEach { entity ->
         try {
             val plainText = cipher.decrypt(entity.encryptedRawText)
-            uploads += PreparedUpload(entity, entity.toUploadDto(plainText))
+            val analysis = entity.encryptedClientAnalysis?.let {
+                Gson().fromJson(cipher.decrypt(it), ClientAnalysis::class.java)
+            }
+            uploads += PreparedUpload(entity, entity.toUploadDto(plainText, analysis))
         } catch (e: TextCipherException) {
             failures += UploadDecryptionFailure(entity, "DECRYPT_${e.error.name}")
         } catch (_: Exception) {
@@ -40,7 +45,7 @@ internal fun prepareUploadBatch(
     return PreparedUploadBatch(uploads, failures)
 }
 
-internal fun CaptureOutboxEntity.toUploadDto(plainText: String) = CaptureUploadItem(
+internal fun CaptureOutboxEntity.toUploadDto(plainText: String, clientAnalysis: ClientAnalysis? = null) = CaptureUploadItem(
     clientCaptureId = clientCaptureId,
     rawText = plainText,
     textSha256 = hash,
@@ -48,4 +53,5 @@ internal fun CaptureOutboxEntity.toUploadDto(plainText: String) = CaptureUploadI
     sourceUrl = sourceUrl,
     mode = mode.name.lowercase(),
     capturedAt = Instant.ofEpochMilli(capturedAt).toString(),
+    clientAnalysis = clientAnalysis,
 )

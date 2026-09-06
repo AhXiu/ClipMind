@@ -5,6 +5,9 @@ import com.clipmind.android.data.CaptureOutboxEntity
 import com.clipmind.android.data.OutboxState
 import com.clipmind.android.network.dto.CaptureBatchRequest
 import com.clipmind.android.network.dto.CaptureBatchResponse
+import com.clipmind.android.network.dto.AnalysisBook
+import com.clipmind.android.network.dto.AnalysisInterpretation
+import com.clipmind.android.network.dto.ClientAnalysis
 import com.clipmind.android.network.dto.ServerCard
 import com.clipmind.android.security.FakeTextCipher
 import com.google.gson.Gson
@@ -44,6 +47,28 @@ class CaptureContractTest {
         assertEquals("1970-01-01T00:00:00Z", item["captured_at"].asString)
         assertFalse(item.has("clientCaptureId"))
         assertFalse(item.has("hash"))
+    }
+
+    @Test fun clientAnalysisUsesSharedSnakeCaseContractAndServerOmitsIt() {
+        val cipher = FakeTextCipher()
+        val analysis = ClientAnalysis(
+            "openrouter", "vendor/model", "认知",
+            AnalysisInterpretation("摘要", "洞察", "行动"),
+            listOf(AnalysisBook("书", "作者")),
+        )
+        val base = CaptureOutboxEntity(
+            clientCaptureId = "c", encryptedRawText = cipher.encrypt("text"), hash = "h",
+            sourceApp = null, sourceUrl = null, mode = CaptureMode.AUTO, state = OutboxState.READY,
+            capturedAt = 0, updatedAt = 0,
+        )
+        val byok = base.copy(encryptedClientAnalysis = cipher.encrypt(gson.toJson(analysis)))
+        val byokJson = JsonParser.parseString(gson.toJson(prepareUploadBatch(listOf(byok), cipher).uploads.single().item)).asJsonObject
+        assertEquals("openrouter", byokJson.getAsJsonObject("client_analysis")["provider"].asString)
+        assertEquals("认知", byokJson.getAsJsonObject("client_analysis")["primary_tag"].asString)
+        assertTrue(byokJson.getAsJsonObject("client_analysis").has("interpretation"))
+        assertTrue(byokJson.getAsJsonObject("client_analysis").has("books"))
+        val serverJson = JsonParser.parseString(gson.toJson(prepareUploadBatch(listOf(base), cipher).uploads.single().item)).asJsonObject
+        assertFalse(serverJson.has("client_analysis"))
     }
 
     @Test fun responseParsesAcceptedAndRejectedObjects() {

@@ -122,18 +122,30 @@ func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
 	clean := strings.Join(strings.Fields(c.Text), " ")
 	var result llm.Result
 	var last error
-	for n := 0; n < 3; n++ {
-		result, last = w.LLM.Analyze(ctx, clean)
-		if last == nil {
-			last = llm.Validate(result)
+	providerName, modelName := llm.Identity(w.LLM)
+	if c.ClientAnalysis != nil {
+		if last = domain.ValidateClientAnalysis(*c.ClientAnalysis); last == nil {
+			candidates := make([]domain.BookCandidate, len(c.ClientAnalysis.Books))
+			for i, book := range c.ClientAnalysis.Books {
+				candidates[i] = domain.BookCandidate{Title: book.Title, Author: book.Author}
+			}
+			result = llm.Result{PrimaryTag: c.ClientAnalysis.PrimaryTag, Interpretation: c.ClientAnalysis.Interpretation, Books: candidates}
+			providerName, modelName = c.ClientAnalysis.Provider, c.ClientAnalysis.Model
 		}
-		if last == nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(n+1) * 20 * time.Millisecond):
+	} else {
+		for n := 0; n < 3; n++ {
+			result, last = w.LLM.Analyze(ctx, clean)
+			if last == nil {
+				last = llm.Validate(result)
+			}
+			if last == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(n+1) * 20 * time.Millisecond):
+			}
 		}
 	}
 	if last != nil {
@@ -141,7 +153,7 @@ func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
 	}
 	result.Books = w.Books.Verify(ctx, result.Books)
 	now := time.Now().UTC()
-	v := domain.CardVersion{ID: service.ID("ver_"), CardID: card.ID, CreatedAt: now, CleanText: clean, PrimaryTag: result.PrimaryTag, Interpretation: result.Interpretation, Books: result.Books}
+	v := domain.CardVersion{ID: service.ID("ver_"), CardID: card.ID, CreatedAt: now, CleanText: clean, PrimaryTag: result.PrimaryTag, Interpretation: result.Interpretation, Books: result.Books, LLMProvider: providerName, LLMModel: modelName}
 	v.Markdown = render.Markdown(card.ID, now.Format(time.RFC3339), clean, v.PrimaryTag, v.Interpretation, v.Books)
 	if e = c.Move(domain.StatusAISucceeded, now); e != nil {
 		return e

@@ -35,6 +35,12 @@ interface CaptureOutboxDao {
     @Query("UPDATE capture_outbox SET state = 'DECRYPTION_FAILED', updatedAt = :now, lastErrorCode = :errorCode WHERE id IN (:ids) AND (state = 'READY' OR state = 'RETRYABLE_ERROR')")
     suspend fun markDecryptionFailed(ids: List<Long>, now: Long, errorCode: String): Int
 
+    @Query("UPDATE capture_outbox SET encryptedClientAnalysis = :encryptedAnalysis, updatedAt = :now, lastErrorCode = NULL WHERE id = :id AND encryptedClientAnalysis IS NULL AND (state = 'READY' OR state = 'RETRYABLE_ERROR')")
+    suspend fun cacheClientAnalysis(id: Long, encryptedAnalysis: String, now: Long): Int
+
+    @Query("UPDATE capture_outbox SET state = 'RETRYABLE_ERROR', retryCount = retryCount + 1, nextRetryAt = :nextRetryAt, updatedAt = :now, lastErrorCode = :errorCode WHERE id = :id AND (state = 'READY' OR state = 'RETRYABLE_ERROR')")
+    suspend fun markAnalysisError(id: Long, now: Long, nextRetryAt: Long, errorCode: String): Int
+
     @Query("UPDATE capture_outbox SET state = 'UPLOADING', updatedAt = :now WHERE id IN (:ids) AND (state = 'READY' OR state = 'RETRYABLE_ERROR')")
     suspend fun markUploading(ids: List<Long>, now: Long): Int
 
