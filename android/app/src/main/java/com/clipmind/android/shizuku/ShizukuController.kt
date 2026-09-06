@@ -6,6 +6,7 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.Process
+import android.util.Log
 import com.clipmind.android.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,15 +20,21 @@ import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 
 class ShizukuController(private val context: Context) {
-    companion object { const val PERMISSION_REQUEST_CODE = 41 }
+    companion object {
+        const val PERMISSION_REQUEST_CODE = 41
+        private const val TAG = "ClipMindClipboard"
+    }
 
     private val mutableState = MutableStateFlow(ShizukuState.UNAVAILABLE)
     val state: StateFlow<ShizukuState> = mutableState.asStateFlow()
+    private val mutableClipboardDiagnostic = MutableStateFlow<ClipboardDiagnosticUiState>(ClipboardDiagnosticUiState.Idle)
+    val clipboardDiagnostic: StateFlow<ClipboardDiagnosticUiState> = mutableClipboardDiagnostic.asStateFlow()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val reconnectPolicy = ReconnectBackoffPolicy()
     @Volatile private var remote: IClipboardUserService? = null
     @Volatile private var started = false
     @Volatile private var binding = false
+    @Volatile private var lastLoggedClipboardError: String? = null
     private var reconnectJob: Job? = null
 
     private val binderReceived = Shizuku.OnBinderReceivedListener {
@@ -116,7 +123,18 @@ class ShizukuController(private val context: Context) {
         mutableState.value = ShizukuState.UNAVAILABLE
     }
 
+    fun markClipboardCheckStarted() {
+        mutableClipboardDiagnostic.value = ClipboardDiagnosticUiState.Checking
+    }
+
     fun readClipboard(): ClipboardReadResult {
+        val result = readClipboardInternal()
+        mutableClipboardDiagnostic.value = result.toDiagnosticUiState()
+        logClipboardFailure(result)
+        return result
+    }
+
+    private fun readClipboardInternal(): ClipboardReadResult {
         if (mutableState.value != ShizukuState.ACTIVE) return ClipboardReadResult.Error("SHIZUKU_NOT_ACTIVE", mutableState.value.name)
         val bundle = try { remote?.readPrimaryClip() } catch (e: Exception) {
             remote = null
@@ -129,6 +147,20 @@ class ShizukuController(private val context: Context) {
             bundle.getString("text")?.let { ClipboardReadResult.Success(it) }
                 ?: ClipboardReadResult.Error("NO_PLAIN_TEXT", null)
         } else ClipboardReadResult.Error(bundle.getString("code") ?: "UNKNOWN", bundle.getString("detail"))
+    }
+
+    private fun logClipboardFailure(result: ClipboardReadResult) {
+        if (result is ClipboardReadResult.Success) {
+            lastLoggedClipboardError = null
+            return
+        }
+        result as ClipboardReadResult.Error
+        if (result.code == "EMPTY_CLIP" || result.code == "NO_PLAIN_TEXT") return
+        val safeDetail = result.detail?.replace('\n', ' ')?.replace('\r', ' ')?.take(1000)
+        val key = "${result.code}|$safeDetail"
+        if (lastLoggedClipboardError == key) return
+        lastLoggedClipboardError = key
+        Log.e(TAG, "event=clipboard_read_failed code=${result.code} detail=${safeDetail ?: "none"}")
     }
 
     private fun refreshAndBind() {

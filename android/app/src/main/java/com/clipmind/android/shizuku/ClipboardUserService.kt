@@ -1,7 +1,10 @@
 package com.clipmind.android.shizuku
 
+import android.content.AttributionSource
 import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Process
@@ -18,31 +21,59 @@ class ClipboardUserService(private val context: Context) : IClipboardUserService
 
     override fun readPrimaryClip(): Bundle {
         val userId = userIdConfiguration.getOrNull() ?: return error("USER_ID_NOT_CONFIGURED", null)
-        val service = getClipboardBinder() ?: return error("CLIPBOARD_SERVICE_MISSING", null)
-        val iface = getClipboardInterface(service) ?: return error("CLIPBOARD_INTERFACE_UNAVAILABLE", null)
-        val candidates = iface.javaClass.methods.filter { it.name == "getPrimaryClip" }.sortedBy { it.parameterCount }
-        if (candidates.isEmpty()) return error("SIGNATURE_NOT_FOUND", iface.javaClass.name)
-
-        val failures = mutableListOf<String>()
-        for (method in candidates) {
-            val args = argumentsFor(method, userId)
-            if (args == null) {
-                failures += "unsupported:${method.parameterTypes.joinToString { it.simpleName }}"
-                continue
-            }
-            try {
-                val clip = method.invoke(iface, *args) as? ClipData ?: return error("EMPTY_CLIP", null)
-                if (clip.itemCount == 0) return error("EMPTY_CLIP", null)
-                val item = clip.getItemAt(0)
-                // Reject URI/Intent-only clips; coercion can resolve content providers unexpectedly.
-                val text = item.text?.toString() ?: return error("NO_PLAIN_TEXT", null)
-                return Bundle().apply { putBoolean("ok", true); putString("text", text) }
-            } catch (t: Throwable) {
-                val cause = (t as? InvocationTargetException)?.targetException ?: t
-                failures += "${method.parameterTypes.joinToString { it.simpleName }}:${cause.javaClass.simpleName}"
+        val reflectionFailures = mutableListOf<String>()
+        val service = getClipboardBinder()
+        if (service == null) {
+            reflectionFailures += "CLIPBOARD_SERVICE_MISSING"
+        } else {
+            val iface = getClipboardInterface(service)
+            if (iface == null) {
+                reflectionFailures += "CLIPBOARD_INTERFACE_UNAVAILABLE"
+            } else {
+                val candidates = iface.javaClass.methods
+                    .filter { it.name == "getPrimaryClip" }
+                    .sortedBy { it.parameterCount }
+                if (candidates.isEmpty()) {
+                    reflectionFailures += "SIGNATURE_NOT_FOUND:${iface.javaClass.name}"
+                } else {
+                    for (method in candidates) {
+                        val args = argumentsFor(method, userId)
+                        if (args == null) {
+                            reflectionFailures += "unsupported:${method.signatureDescription()}"
+                            continue
+                        }
+                        try {
+                            return clipResult(method.invoke(iface, *args) as? ClipData)
+                        } catch (t: Throwable) {
+                            val cause = (t as? InvocationTargetException)?.targetException ?: t
+                            reflectionFailures += "${method.signatureDescription()}:${cause.javaClass.simpleName}"
+                        }
+                    }
+                }
             }
         }
-        return error("ALL_SIGNATURES_FAILED", failures.joinToString("; ").take(1000))
+
+        // The public API is attempted only with a shell package context whose attribution UID/package
+        // match the actual Shizuku UserService process. It is never called with the app package here.
+        val fallback = readWithPublicClipboardManager()
+        if (fallback != null) return fallback
+        reflectionFailures += "public_fallback:unsafe_or_failed"
+
+        val primaryCode = when {
+            reflectionFailures.any { it.startsWith("CLIPBOARD_INTERFACE_UNAVAILABLE") } -> "CLIPBOARD_INTERFACE_UNAVAILABLE"
+            reflectionFailures.any { it.startsWith("SIGNATURE_NOT_FOUND") } -> "SIGNATURE_NOT_FOUND"
+            reflectionFailures.any { it.startsWith("CLIPBOARD_SERVICE_MISSING") } -> "CLIPBOARD_SERVICE_MISSING"
+            else -> "ALL_SIGNATURES_FAILED"
+        }
+        return error(primaryCode, reflectionFailures.joinToString("; ").take(1000))
+    }
+
+    private fun clipResult(clip: ClipData?): Bundle {
+        if (clip == null || clip.itemCount == 0) return error("EMPTY_CLIP", null)
+        val item = clip.getItemAt(0)
+        // Reject URI/Intent-only clips; coercion can resolve content providers unexpectedly.
+        val text = item.text?.toString() ?: return error("NO_PLAIN_TEXT", null)
+        return Bundle().apply { putBoolean("ok", true); putString("text", text) }
     }
 
     private fun getClipboardBinder(): IBinder? = try {
@@ -55,22 +86,46 @@ class ClipboardUserService(private val context: Context) : IClipboardUserService
         stub.getMethod("asInterface", IBinder::class.java).invoke(null, binder)
     } catch (_: Throwable) { null }
 
-    /** Explicitly supports known primitive/String attribution variants; unknown object types are not guessed. */
+    /** Supports known primitive/String/AttributionSource variants; unknown object types are not guessed. */
     private fun argumentsFor(method: Method, userId: Int): Array<Any?>? {
-        var stringIndex = 0
-        var intIndex = 0
-        val args = arrayOfNulls<Any?>(method.parameterCount)
-        val callerPackage = if (Process.myUid() == Process.SHELL_UID) "com.android.shell" else context.packageName
-        for ((index, type) in method.parameterTypes.withIndex()) {
-            args[index] = when {
-                type == String::class.java -> if (stringIndex++ == 0) callerPackage else null
-                type == Int::class.javaPrimitiveType || type == Int::class.javaObjectType -> if (intIndex++ == 0) userId else 0
-                type == Boolean::class.javaPrimitiveType || type == Boolean::class.javaObjectType -> false
-                else -> return null
+        val kinds = mapClipboardParameterTypes(method.parameterTypes.map { it.name }) ?: return null
+        val callerPackage = if (Process.myUid() == Process.SHELL_UID) SHELL_PACKAGE else context.packageName
+        val attributionSource by lazy { createAttributionSource(callerPackage) }
+        return Array(method.parameterCount) { index ->
+            when (kinds[index]) {
+                ClipboardArgumentKind.CALLING_PACKAGE -> callerPackage
+                ClipboardArgumentKind.NULL_STRING -> null
+                ClipboardArgumentKind.USER_ID -> userId
+                ClipboardArgumentKind.ZERO_INT -> 0
+                ClipboardArgumentKind.FALSE_BOOLEAN -> false
+                ClipboardArgumentKind.ATTRIBUTION_SOURCE -> attributionSource ?: return null
             }
         }
-        return args
     }
+
+    private fun createAttributionSource(callerPackage: String): AttributionSource? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        return runCatching {
+            AttributionSource.Builder(Process.myUid())
+                .setPackageName(callerPackage)
+                .build()
+        }.getOrNull()
+    }
+
+    private fun readWithPublicClipboardManager(): Bundle? {
+        if (Process.myUid() != Process.SHELL_UID) return null
+        return runCatching {
+            val shellContext = context.createPackageContext(SHELL_PACKAGE, Context.CONTEXT_RESTRICTED)
+            if (shellContext.packageName != SHELL_PACKAGE) return null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val attribution = shellContext.attributionSource
+                if (attribution.uid != Process.SHELL_UID || attribution.packageName != SHELL_PACKAGE) return null
+            }
+            clipResult(shellContext.getSystemService(ClipboardManager::class.java).primaryClip)
+        }.getOrNull()
+    }
+
+    private fun Method.signatureDescription() = parameterTypes.joinToString(prefix = "(", postfix = ")") { it.simpleName }
 
     private fun error(code: String, detail: String?) = Bundle().apply {
         putBoolean("ok", false)
@@ -80,4 +135,8 @@ class ClipboardUserService(private val context: Context) : IClipboardUserService
 
     fun destroy() = Unit
     fun exit() = Process.killProcess(Process.myPid())
+
+    private companion object {
+        const val SHELL_PACKAGE = "com.android.shell"
+    }
 }

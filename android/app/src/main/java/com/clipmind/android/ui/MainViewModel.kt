@@ -9,7 +9,9 @@ import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
 import com.clipmind.android.network.HealthCheckResult
 import com.clipmind.android.service.CaptureForegroundService
+import com.clipmind.android.shizuku.ClipboardDiagnosticUiState
 import com.clipmind.android.shizuku.ShizukuState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +35,7 @@ data class MainUiState(
     val recent: List<CaptureUiModel> = emptyList(),
     val apiBaseUrl: String = BuildConfig.API_BASE_URL,
     val connectionState: ConnectionUiState = ConnectionUiState.Idle,
+    val clipboardDiagnostic: ClipboardDiagnosticUiState = ClipboardDiagnosticUiState.Idle,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -52,6 +55,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         state.copy(tokenConfigured = tokenConfigured)
     }.combine(connectionState) { state, connection ->
         state.copy(connectionState = connection)
+    }.combine(container.shizuku.clipboardDiagnostic) { state, diagnostic ->
+        state.copy(clipboardDiagnostic = diagnostic)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     fun requestShizukuPermission() = container.shizuku.requestPermission()
@@ -63,6 +68,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopCapture() = CaptureForegroundService.stop(app)
     fun confirm(id: Long) = viewModelScope.launch { container.repository.confirm(id) }
     fun discard(id: Long) = viewModelScope.launch { container.repository.discard(id) }
+
+    fun testClipboardRead() {
+        if (container.shizuku.clipboardDiagnostic.value == ClipboardDiagnosticUiState.Checking) return
+        container.shizuku.markClipboardCheckStarted()
+        viewModelScope.launch(Dispatchers.IO) { container.shizuku.readClipboard() }
+    }
 
     fun testConnection() {
         if (connectionState.value == ConnectionUiState.Checking) return

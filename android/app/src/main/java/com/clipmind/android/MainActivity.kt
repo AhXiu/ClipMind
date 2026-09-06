@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
+import com.clipmind.android.shizuku.ClipboardDiagnosticUiState
 import com.clipmind.android.shizuku.ShizukuState
 import com.clipmind.android.ui.ConnectionUiState
 import com.clipmind.android.ui.MainUiState
@@ -72,7 +73,7 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                StatusCard(state.shizukuState, vm)
+                StatusCard(state.shizukuState, state.clipboardDiagnostic, vm)
                 Spacer(Modifier.height(12.dp))
                 Text("采集模式", style = MaterialTheme.typography.titleMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -141,7 +142,11 @@ private fun TokenCard(configured: Boolean, vm: MainViewModel) {
 }
 
 @Composable
-private fun StatusCard(status: ShizukuState, vm: MainViewModel) {
+private fun StatusCard(
+    status: ShizukuState,
+    diagnostic: ClipboardDiagnosticUiState,
+    vm: MainViewModel,
+) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Shizuku：${status.name}", style = MaterialTheme.typography.titleMedium)
@@ -156,6 +161,17 @@ private fun StatusCard(status: ShizukuState, vm: MainViewModel) {
                 if (status == ShizukuState.PERMISSION_REQUIRED) Button(onClick = vm::requestShizukuPermission) { Text("申请权限") }
                 if (status == ShizukuState.UNAVAILABLE || status == ShizukuState.DEAD) Button(onClick = vm::reconnect) { Text("重连") }
             }
+            Button(
+                onClick = vm::testClipboardRead,
+                enabled = diagnostic != ClipboardDiagnosticUiState.Checking,
+            ) { Text(if (diagnostic == ClipboardDiagnosticUiState.Checking) "检查中…" else "测试读取剪贴板") }
+            Text(when (diagnostic) {
+                ClipboardDiagnosticUiState.Idle -> "剪贴板诊断：尚未检查"
+                ClipboardDiagnosticUiState.Checking -> "剪贴板诊断：检查中…"
+                is ClipboardDiagnosticUiState.Success -> "剪贴板诊断：读取成功（${diagnostic.characterCount} 个字符）"
+                is ClipboardDiagnosticUiState.Failed -> "剪贴板诊断：失败 ${diagnostic.code}${diagnostic.detail?.let { "（$it）" } ?: ""}"
+            }, style = MaterialTheme.typography.bodySmall)
+            Text("诊断仅显示字符数和错误信息，不显示或记录剪贴板正文。", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
