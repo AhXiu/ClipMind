@@ -9,7 +9,9 @@ interface TextCipher {
 }
 
 enum class TextCipherError {
-    KEY_UNAVAILABLE,
+    INVALID_KEY,
+    INVALID_PARAMETERS,
+    KEYSTORE_UNAVAILABLE,
     KEY_INVALIDATED,
     ENCRYPTION_FAILED,
     MALFORMED_CIPHERTEXT,
