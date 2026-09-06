@@ -11,10 +11,13 @@ class CaptureHashTest {
         assertEquals(CaptureHash.sha256(" hello   world\n"), CaptureHash.sha256("hello world"))
     }
     @Test fun differentTextHasDifferentHash() = assertNotEquals(CaptureHash.sha256("abcdefgh"), CaptureHash.sha256("abcdefgi"))
-    @Test fun deduplicatesWithinWindowOnly() {
+    @Test fun checkDoesNotOccupyHashUntilCommit() {
         val dedup = RecentHashDeduplicator(1000)
         assertFalse(dedup.isDuplicate("a", 1000))
-        assertTrue(dedup.isDuplicate("a", 1500))
-        assertFalse(dedup.isDuplicate("a", 2600))
+        assertFalse(dedup.isDuplicate("a", 1500))
+
+        dedup.commit("a", 1500)
+        assertTrue(dedup.isDuplicate("a", 2000))
+        assertFalse(dedup.isDuplicate("a", 2601))
     }
 }

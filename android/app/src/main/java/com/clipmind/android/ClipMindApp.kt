@@ -9,6 +9,7 @@ import com.clipmind.android.network.CaptureApi
 import com.clipmind.android.network.HealthChecker
 import com.clipmind.android.security.AndroidKeystoreTextCipher
 import com.clipmind.android.security.SecureTokenStore
+import com.clipmind.android.service.CaptureProcessingDiagnostics
 import com.clipmind.android.shizuku.ShizukuController
 import com.clipmind.android.worker.UploadScheduler
 import com.clipmind.android.worker.WorkManagerImmediateUploadScheduler
@@ -32,6 +33,7 @@ class AppContainer(app: Application) {
     val database = ClipMindDatabase.create(app)
     val settings = UserSettings(app)
     val shizuku = ShizukuController(app)
+    val captureDiagnostics = CaptureProcessingDiagnostics()
     val textCipher = AndroidKeystoreTextCipher()
     val tokenStore = SecureTokenStore(
         app.getSharedPreferences("secure_tokens", Application.MODE_PRIVATE),

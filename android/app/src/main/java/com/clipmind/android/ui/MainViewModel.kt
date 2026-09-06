@@ -9,6 +9,7 @@ import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
 import com.clipmind.android.network.HealthCheckResult
 import com.clipmind.android.service.CaptureForegroundService
+import com.clipmind.android.service.CaptureProcessingDiagnostic
 import com.clipmind.android.shizuku.ClipboardDiagnosticUiState
 import com.clipmind.android.shizuku.ShizukuState
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,7 @@ data class MainUiState(
     val apiBaseUrl: String = BuildConfig.API_BASE_URL,
     val connectionState: ConnectionUiState = ConnectionUiState.Idle,
     val clipboardDiagnostic: ClipboardDiagnosticUiState = ClipboardDiagnosticUiState.Idle,
+    val captureProcessingDiagnostic: CaptureProcessingDiagnostic? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -57,6 +59,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         state.copy(connectionState = connection)
     }.combine(container.shizuku.clipboardDiagnostic) { state, diagnostic ->
         state.copy(clipboardDiagnostic = diagnostic)
+    }.combine(container.captureDiagnostics.latest) { state, diagnostic ->
+        state.copy(captureProcessingDiagnostic = diagnostic)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     fun requestShizukuPermission() = container.shizuku.requestPermission()

@@ -38,6 +38,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureUiModel
+import com.clipmind.android.service.CaptureProcessingDiagnostic
+import com.clipmind.android.service.toUiDescription
 import com.clipmind.android.shizuku.ClipboardDiagnosticUiState
 import com.clipmind.android.shizuku.ShizukuState
 import com.clipmind.android.ui.ConnectionUiState
@@ -73,7 +75,13 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                StatusCard(state.shizukuState, state.clipboardDiagnostic, vm)
+                StatusCard(
+                    state.shizukuState,
+                    state.clipboardDiagnostic,
+                    state.captureRequested,
+                    state.captureProcessingDiagnostic,
+                    vm,
+                )
                 Spacer(Modifier.height(12.dp))
                 Text("采集模式", style = MaterialTheme.typography.titleMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -145,6 +153,8 @@ private fun TokenCard(configured: Boolean, vm: MainViewModel) {
 private fun StatusCard(
     status: ShizukuState,
     diagnostic: ClipboardDiagnosticUiState,
+    captureRequested: Boolean,
+    processingDiagnostic: CaptureProcessingDiagnostic?,
     vm: MainViewModel,
 ) {
     Card(Modifier.fillMaxWidth()) {
@@ -161,17 +171,24 @@ private fun StatusCard(
                 if (status == ShizukuState.PERMISSION_REQUIRED) Button(onClick = vm::requestShizukuPermission) { Text("申请权限") }
                 if (status == ShizukuState.UNAVAILABLE || status == ShizukuState.DEAD) Button(onClick = vm::reconnect) { Text("重连") }
             }
+            Text("自动采集：${if (captureRequested) "已开启" else "未开启"}", style = MaterialTheme.typography.titleMedium)
+            Text(
+                processingDiagnostic?.let {
+                    "最新处理：${it.toUiDescription()}；${DateFormat.getDateTimeInstance().format(Date(it.processedAt))}；${it.characterCount} 个字符"
+                } ?: "最新处理：暂无（开启自动采集后显示）",
+                style = MaterialTheme.typography.bodySmall,
+            )
             Button(
                 onClick = vm::testClipboardRead,
                 enabled = diagnostic != ClipboardDiagnosticUiState.Checking,
-            ) { Text(if (diagnostic == ClipboardDiagnosticUiState.Checking) "检查中…" else "测试读取剪贴板") }
+            ) { Text(if (diagnostic == ClipboardDiagnosticUiState.Checking) "检查中…" else "测试读取剪贴板（只读）") }
             Text(when (diagnostic) {
                 ClipboardDiagnosticUiState.Idle -> "剪贴板诊断：尚未检查"
                 ClipboardDiagnosticUiState.Checking -> "剪贴板诊断：检查中…"
                 is ClipboardDiagnosticUiState.Success -> "剪贴板诊断：读取成功（${diagnostic.characterCount} 个字符）"
                 is ClipboardDiagnosticUiState.Failed -> "剪贴板诊断：失败 ${diagnostic.code}${diagnostic.detail?.let { "（$it）" } ?: ""}"
             }, style = MaterialTheme.typography.bodySmall)
-            Text("诊断仅显示字符数和错误信息，不显示或记录剪贴板正文。", style = MaterialTheme.typography.bodySmall)
+            Text("测试读取只读且不入库；仅显示字符数和错误信息，不显示或记录剪贴板正文。", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

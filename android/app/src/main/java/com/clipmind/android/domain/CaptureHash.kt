@@ -14,8 +14,11 @@ class RecentHashDeduplicator(private val windowMillis: Long = 30_000L) {
 
     @Synchronized fun isDuplicate(hash: String, now: Long): Boolean {
         seen.entries.removeAll { now - it.value > windowMillis }
-        val duplicate = seen.containsKey(hash)
+        return seen.containsKey(hash)
+    }
+
+    @Synchronized fun commit(hash: String, now: Long) {
+        seen.entries.removeAll { now - it.value > windowMillis }
         seen[hash] = now
-        return duplicate
     }
 }

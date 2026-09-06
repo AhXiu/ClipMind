@@ -9,12 +9,14 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.clipmind.android.ClipMindApp
 import com.clipmind.android.domain.CaptureHash
 import com.clipmind.android.domain.RecentHashDeduplicator
 import com.clipmind.android.shizuku.ClipboardReadResult
 import com.clipmind.android.shizuku.ShizukuState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,6 +32,7 @@ class CaptureForegroundService : Service() {
         const val ACTION_STOP = "com.clipmind.android.STOP_CAPTURE"
         private const val CHANNEL = "capture"
         private const val NOTIFICATION_ID = 1001
+        private const val TAG = "ClipMindCapture"
 
         fun start(context: Context) = context.startForegroundService(Intent(context, CaptureForegroundService::class.java).setAction(ACTION_START))
         fun stop(context: Context) = context.startService(Intent(context, CaptureForegroundService::class.java).setAction(ACTION_STOP))
@@ -80,23 +83,48 @@ class CaptureForegroundService : Service() {
         if (pollJob?.isActive == true) return
         pollJob = scope.launch {
             while (true) {
-                when (val result = app.container.shizuku.readClipboard()) {
-                    is ClipboardReadResult.Success -> {
-                        val hash = CaptureHash.sha256(result.text)
-                        val now = System.currentTimeMillis()
-                        if (!deduplicator.isDuplicate(hash, now)) {
-                            app.container.repository.capture(result.text, null, app.container.settings.mode.value, now)
+                try {
+                    when (val result = app.container.shizuku.readClipboard()) {
+                        is ClipboardReadResult.Success -> processClipboardText(result.text)
+                        is ClipboardReadResult.Error -> if (
+                            result.code == "SHIZUKU_NOT_ACTIVE" || result.code == "BINDER_CALL_FAILED"
+                        ) {
+                            return@launch
                         }
                     }
-                    is ClipboardReadResult.Error -> if (
-                        result.code == "SHIZUKU_NOT_ACTIVE" || result.code == "BINDER_CALL_FAILED"
-                    ) {
-                        return@launch
-                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.e(TAG, "event=capture_poll_failed type=${error::class.java.simpleName}")
                 }
                 delay(1_500)
             }
         }
+    }
+
+    private suspend fun processClipboardText(text: String) {
+        val hash = CaptureHash.sha256(text)
+        val now = System.currentTimeMillis()
+        if (deduplicator.isDuplicate(hash, now)) return
+
+        val handling = try {
+            handlingFor(app.container.repository.capture(text, null, app.container.settings.mode.value, now))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            handlingForFailure(error)
+        }
+        if (handling.commitRecentHash) deduplicator.commit(hash, now)
+        app.container.captureDiagnostics.record(handling.result, now, text.length)
+        Log.i(TAG, "event=capture_processed result=${handling.result.logValue()} chars=${text.length}")
+    }
+
+    private fun CaptureProcessingResult.logValue(): String = when (this) {
+        is CaptureProcessingResult.Stored -> "STORED state=${state.name} record_id=$id"
+        is CaptureProcessingResult.Filtered -> "FILTERED reason=$reason"
+        CaptureProcessingResult.Duplicate24H -> "DUPLICATE_24H"
+        is CaptureProcessingResult.EncryptionFailed -> "ENCRYPTION_FAILED code=$code"
+        is CaptureProcessingResult.ProcessingFailed -> "PROCESSING_FAILED type=$type"
     }
 
     @Synchronized private fun stopPolling() {
