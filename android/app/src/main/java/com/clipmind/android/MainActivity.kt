@@ -1,66 +1,62 @@
 package com.clipmind.android
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import com.clipmind.android.data.AiMode
-import com.clipmind.android.data.CaptureMode
-import com.clipmind.android.data.CaptureUiModel
-import com.clipmind.android.service.CaptureProcessingDiagnostic
-import com.clipmind.android.service.toUiDescription
-import com.clipmind.android.shizuku.ClipboardDiagnosticUiState
-import com.clipmind.android.shizuku.ShizukuState
-import com.clipmind.android.ui.AiConnectionUiState
-import com.clipmind.android.ui.CardOperationUiState
-import com.clipmind.android.ui.ConnectionUiState
-import com.clipmind.android.ui.MainUiState
+import com.clipmind.android.ui.ClipMindAppRoot
 import com.clipmind.android.ui.MainViewModel
-import com.clipmind.android.ui.shouldShowPublishAction
-import java.text.DateFormat
-import java.util.Date
+import com.clipmind.android.export.ExportFormat
+import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val speech = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(viewModel::addManualText)
+    }
+    private val zipDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { it?.let { uri -> viewModel.export(uri, ExportFormat.OBSIDIAN_ZIP) } }
+    private val csvDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { it?.let { uri -> viewModel.export(uri, ExportFormat.CSV) } }
+    private val textDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { it?.let { uri -> viewModel.export(uri, ExportFormat.PLAIN_TEXT) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        acceptSharedText(intent)
         setContent {
             val state by viewModel.uiState.collectAsState()
-            MaterialTheme { MainScreen(state, viewModel, ::startCapture) }
+            MaterialTheme {
+                ClipMindAppRoot(
+                    state = state,
+                    vm = viewModel,
+                    onStartCapture = ::startCapture,
+                    onVoiceInput = ::startVoiceInput,
+                    onOpenShizuku = ::openShizuku,
+                    onCopy = ::copyText,
+                    onExport = ::createExportDocument,
+                )
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        acceptSharedText(intent)
+    }
+
+    private fun acceptSharedText(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf(String::isNotBlank)?.let(viewModel::addManualText)
         }
     }
 
@@ -68,263 +64,32 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         viewModel.startCapture()
     }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MainScreen(state: MainUiState, vm: MainViewModel, startCapture: () -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text("ClipMind") }) }) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                StatusCard(
-                    state.shizukuState,
-                    state.clipboardDiagnostic,
-                    state.captureRequested,
-                    state.captureProcessingDiagnostic,
-                    vm,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text("采集模式", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(state.mode == CaptureMode.AUTO, { vm.setMode(CaptureMode.AUTO) }, { Text("自动") })
-                    FilterChip(state.mode == CaptureMode.CONFIRM, { vm.setMode(CaptureMode.CONFIRM) }, { Text("本地确认后上传") })
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = startCapture, enabled = !state.captureRequested) { Text("启动采集") }
-                    Button(onClick = vm::stopCapture, enabled = state.captureRequested) { Text("停止采集") }
-                }
-            }
-            item { ConnectionCard(state.apiBaseUrl, state.connectionState, vm) }
-            item { TokenCard(state.tokenConfigured, vm) }
-            item { AiSettingsCard(state, vm) }
-            item { Text("待本地确认上传 (${state.pending.size})", style = MaterialTheme.typography.titleMedium) }
-            if (state.pending.isEmpty()) item { Text("暂无待本地确认上传内容") }
-            items(state.pending, key = { "pending-${it.id}" }) {
-                CaptureCard(it, true, state.cardOperations[it.id], vm)
-            }
-            item { Text("最近采集", style = MaterialTheme.typography.titleMedium) }
-            if (state.recent.isEmpty()) item { Text("暂无采集记录") }
-            items(state.recent, key = { "recent-${it.id}" }) {
-                CaptureCard(it, false, state.cardOperations[it.id], vm)
-            }
-            item { Spacer(Modifier.height(24.dp)) }
+    private fun startVoiceInput() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "说出要保存的卡片内容")
+        }
+        if (intent.resolveActivity(packageManager) != null) speech.launch(intent)
+        else viewModel.showMessage("设备没有可用的系统语音识别服务")
+    }
+
+    private fun openShizuku() {
+        packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")?.let(::startActivity)
+            ?: startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_SETTINGS))
+    }
+
+    private fun createExportDocument(format: ExportFormat) {
+        val base = "ClipMind-${LocalDate.now()}"
+        when (format) {
+            ExportFormat.OBSIDIAN_ZIP -> zipDocument.launch("$base-Obsidian.zip")
+            ExportFormat.CSV -> csvDocument.launch("$base.csv")
+            ExportFormat.PLAIN_TEXT -> textDocument.launch("$base.txt")
         }
     }
-}
 
-@Composable
-private fun ConnectionCard(baseUrl: String, state: ConnectionUiState, vm: MainViewModel) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("后端连接", style = MaterialTheme.typography.titleMedium)
-            Text("API Base URL：$baseUrl", style = MaterialTheme.typography.bodySmall)
-            Text(when (state) {
-                ConnectionUiState.Idle -> "连接状态：尚未检查"
-                ConnectionUiState.Checking -> "连接状态：检查中…"
-                ConnectionUiState.Connected -> "连接状态：连接成功"
-                is ConnectionUiState.Failed -> "连接状态：连接失败（${state.reason}）"
-            })
-            Button(
-                onClick = vm::testConnection,
-                enabled = state != ConnectionUiState.Checking,
-            ) { Text(if (state == ConnectionUiState.Checking) "检查中…" else "测试连接") }
-        }
-    }
-}
-
-@Composable
-private fun TokenCard(configured: Boolean, vm: MainViewModel) {
-    var token by remember { mutableStateOf("") }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("上传凭证：${if (configured) "已安全保存" else "未配置"}", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
-                value = token,
-                onValueChange = { token = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Token") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { if (vm.saveToken(token)) token = "" }, enabled = token.isNotBlank()) { Text("保存") }
-                Button(onClick = { vm.clearToken(); token = "" }, enabled = configured) { Text("清除") }
-            }
-            Text("Token 使用 Keystore 加密后存储，不在界面回显。", style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable
-private fun AiSettingsCard(state: MainUiState, vm: MainViewModel) {
-    var apiKey by remember { mutableStateOf("") }
-    var model by remember(state.aiMode) {
-        mutableStateOf(if (state.aiMode == AiMode.BYOK_OPENROUTER) state.openRouterModel else state.arkModel)
-    }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("AI 模式", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(state.aiMode == AiMode.SERVER_ARK, { vm.setAiMode(AiMode.SERVER_ARK) }, { Text("SERVER_ARK") })
-                FilterChip(state.aiMode == AiMode.BYOK_ARK, { vm.setAiMode(AiMode.BYOK_ARK) }, { Text("BYOK_ARK") })
-            }
-            FilterChip(
-                state.aiMode == AiMode.BYOK_OPENROUTER,
-                { vm.setAiMode(AiMode.BYOK_OPENROUTER) },
-                { Text("BYOK_OPENROUTER") },
-            )
-            if (state.aiMode == AiMode.SERVER_ARK) {
-                Text("由 ClipMind 后端分析，手机无需 Provider Key。默认模型：ep-20260306164116-j9fgc")
-            } else {
-                Text(
-                    if (state.aiMode == AiMode.BYOK_ARK)
-                        "固定服务：https://ark.cn-beijing.volces.com/api/v3"
-                    else "固定服务：https://openrouter.ai/api/v1",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("模型 ID") },
-                    singleLine = true,
-                )
-                Button(
-                    onClick = {
-                        if (state.aiMode == AiMode.BYOK_ARK) vm.setArkModel(model)
-                        else vm.setOpenRouterModel(model)
-                    },
-                    enabled = model.isNotBlank(),
-                ) { Text("保存模型 ID") }
-                Text("API Key：${if (state.apiKeyConfigured) "已配置" else "未配置"}")
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("API Key（仅用于覆盖）") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { if (vm.saveApiKey(apiKey)) apiKey = "" }, enabled = apiKey.isNotBlank()) {
-                        Text(if (state.apiKeyConfigured) "覆盖" else "保存")
-                    }
-                    Button(onClick = { vm.clearApiKey(); apiKey = "" }, enabled = state.apiKeyConfigured) { Text("清除") }
-                }
-                Text("Key 仅在本机通过 Android Keystore 加密保存，不会发送给 ClipMind 后端；卸载应用后会丢失。", style = MaterialTheme.typography.bodySmall)
-                Button(
-                    onClick = vm::testModelConnection,
-                    enabled = state.aiConnectionState != AiConnectionUiState.Checking,
-                ) { Text(if (state.aiConnectionState == AiConnectionUiState.Checking) "测试中…" else "测试模型连接") }
-                Text(when (val result = state.aiConnectionState) {
-                    AiConnectionUiState.Idle -> "模型连接：尚未测试"
-                    AiConnectionUiState.Checking -> "模型连接：测试中…"
-                    AiConnectionUiState.Success -> "模型连接：成功"
-                    is AiConnectionUiState.Failed -> "模型连接：失败（${result.errorCode}）"
-                }, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusCard(
-    status: ShizukuState,
-    diagnostic: ClipboardDiagnosticUiState,
-    captureRequested: Boolean,
-    processingDiagnostic: CaptureProcessingDiagnostic?,
-    vm: MainViewModel,
-) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Shizuku：${status.name}", style = MaterialTheme.typography.titleMedium)
-            Text(when (status) {
-                ShizukuState.UNAVAILABLE -> "请安装并启动 Shizuku，然后返回重连。"
-                ShizukuState.PERMISSION_REQUIRED -> "Shizuku 已运行，请授予 ClipMind 权限。"
-                ShizukuState.BINDER_READY -> "权限已就绪，正在连接最小权限 UserService。"
-                ShizukuState.ACTIVE -> "UserService 已连接，可启动采集。"
-                ShizukuState.DEAD -> "连接已断开；确认 Shizuku 正在运行后重连。"
-            })
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (status == ShizukuState.PERMISSION_REQUIRED) Button(onClick = vm::requestShizukuPermission) { Text("申请权限") }
-                if (status == ShizukuState.UNAVAILABLE || status == ShizukuState.DEAD) Button(onClick = vm::reconnect) { Text("重连") }
-            }
-            Text("自动采集：${if (captureRequested) "已开启" else "未开启"}", style = MaterialTheme.typography.titleMedium)
-            Text(
-                processingDiagnostic?.let {
-                    "最新处理：${it.toUiDescription()}；${DateFormat.getDateTimeInstance().format(Date(it.processedAt))}；${it.characterCount} 个字符"
-                } ?: "最新处理：暂无（开启自动采集后显示）",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Button(
-                onClick = vm::testClipboardRead,
-                enabled = diagnostic != ClipboardDiagnosticUiState.Checking,
-            ) { Text(if (diagnostic == ClipboardDiagnosticUiState.Checking) "检查中…" else "测试读取剪贴板（只读）") }
-            Text(when (diagnostic) {
-                ClipboardDiagnosticUiState.Idle -> "剪贴板诊断：尚未检查"
-                ClipboardDiagnosticUiState.Checking -> "剪贴板诊断：检查中…"
-                is ClipboardDiagnosticUiState.Success -> "剪贴板诊断：读取成功（${diagnostic.characterCount} 个字符）"
-                is ClipboardDiagnosticUiState.Failed -> "剪贴板诊断：失败 ${diagnostic.code}${diagnostic.detail?.let { "（$it）" } ?: ""}"
-            }, style = MaterialTheme.typography.bodySmall)
-            Text("测试读取只读且不入库；仅显示字符数和错误信息，不显示或记录剪贴板正文。", style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable
-private fun CaptureCard(
-    item: CaptureUiModel,
-    locallyActionable: Boolean,
-    operation: CardOperationUiState?,
-    vm: MainViewModel,
-) {
-    val cardId = item.serverCardId
-    val isWorking = operation == CardOperationUiState.Working
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(item.content, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Text("本地上传状态：${item.state.name}", style = MaterialTheme.typography.bodySmall)
-            Text("采集时间：${DateFormat.getDateTimeInstance().format(Date(item.capturedAt))}", style = MaterialTheme.typography.bodySmall)
-            Text("本地最后错误码：${item.lastErrorCode ?: "无"}", style = MaterialTheme.typography.bodySmall)
-            Text("重试次数：${item.retryCount}", style = MaterialTheme.typography.bodySmall)
-            Text(
-                "下次重试时间：${if (item.nextRetryAt > 0) DateFormat.getDateTimeInstance().format(Date(item.nextRetryAt)) else "无"}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text("服务端 Card ID：${cardId ?: "尚未生成"}", style = MaterialTheme.typography.bodySmall)
-            Text("服务端状态：${item.serverCardStatus ?: "尚未刷新"}", style = MaterialTheme.typography.bodySmall)
-            Text("服务端最后错误：${item.serverLastError ?: "无"}", style = MaterialTheme.typography.bodySmall)
-            when (item.serverCardStatus) {
-                "persisted", "ai_running" -> Text("AI 处理中，请刷新", color = MaterialTheme.colorScheme.primary)
-                "synced" -> Text("已发布到 Obsidian", color = MaterialTheme.colorScheme.primary)
-            }
-            if (locallyActionable) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (item.contentAvailable) Button(onClick = { vm.confirm(item.id) }) { Text("确认上传") }
-                Button(onClick = { vm.discard(item.id) }) { Text("丢弃") }
-            }
-            if (cardId != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { vm.refreshServerCard(item.id, cardId) },
-                        enabled = !isWorking,
-                    ) { Text(if (isWorking) "处理中…" else "刷新服务端状态") }
-                    if (shouldShowPublishAction(item.mode, item.serverCardStatus)) {
-                        Button(
-                            onClick = { vm.confirmServerCard(item.id, cardId) },
-                            enabled = !isWorking,
-                        ) { Text(if (isWorking) "发布中…" else "发布到 Obsidian") }
-                    }
-                }
-                when (operation) {
-                    is CardOperationUiState.Success -> Text("操作成功，服务端状态：${operation.status}")
-                    is CardOperationUiState.Failed -> Text("操作失败：${operation.errorCode}", color = MaterialTheme.colorScheme.error)
-                    CardOperationUiState.Working -> Text("正在与服务端通信…")
-                    null -> Unit
-                }
-            }
-        }
+    private fun copyText(text: String) {
+        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            .setPrimaryClip(ClipData.newPlainText("ClipMind 卡片", text))
     }
 }

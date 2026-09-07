@@ -1,15 +1,8 @@
 package com.clipmind.android.data
 
-import androidx.room.Entity
-import androidx.room.Index
-import androidx.room.PrimaryKey
-
-@Entity(
-    tableName = "capture_outbox",
-    indices = [Index(value = ["clientCaptureId"], unique = true), Index("hash"), Index("state", "nextRetryAt")],
-)
+/** Joined upload projection kept to minimize network/worker churn. It is not a persisted v4 entity. */
 data class CaptureOutboxEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val id: Long = 0,
     val clientCaptureId: String,
     val encryptedRawText: String,
     val hash: String,

@@ -1,27 +1,35 @@
 package com.clipmind.android.data
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DatabaseMigrationContractTest {
-    @Test fun databaseVersionAndMigrationsAreExplicitAndNonDestructive() {
-        assertEquals(3, CLIPMIND_DATABASE_VERSION)
+    @Test fun databaseVersionAndMigrationChainAreExplicit() {
+        assertEquals(4, CLIPMIND_DATABASE_VERSION)
         assertEquals(1, MIGRATION_1_2.startVersion)
         assertEquals(2, MIGRATION_1_2.endVersion)
         assertEquals(2, MIGRATION_2_3.startVersion)
         assertEquals(3, MIGRATION_2_3.endVersion)
-        val statements = listOf(
-            MIGRATION_1_2_ADD_SERVER_CARD_ID,
-            MIGRATION_1_2_ADD_SERVER_CARD_STATUS,
-            MIGRATION_1_2_ADD_SERVER_LAST_ERROR,
-            MIGRATION_2_3_ADD_AI_PROVIDER,
-            MIGRATION_2_3_ADD_AI_MODEL,
-            MIGRATION_2_3_ADD_ENCRYPTED_CLIENT_ANALYSIS,
-        )
-        assertTrue(statements.all { it.startsWith("ALTER TABLE capture_outbox ADD COLUMN") })
-        assertTrue(statements.all { it.endsWith(" TEXT") })
-        assertFalse(statements.any { "DROP" in it.uppercase() || "DELETE" in it.uppercase() })
+        assertEquals(3, MIGRATION_3_4.startVersion)
+        assertEquals(4, MIGRATION_3_4.endVersion)
+    }
+
+    @Test fun v3DataIsCopiedBeforeLegacyTableIsRemoved() {
+        val cardCopy = MIGRATION_3_4_STATEMENTS.indexOfFirst { it.startsWith("INSERT INTO local_cards") }
+        val metadataCopy = MIGRATION_3_4_STATEMENTS.indexOfFirst { it.startsWith("INSERT INTO sync_metadata") }
+        val drop = MIGRATION_3_4_STATEMENTS.indexOf("DROP TABLE capture_outbox")
+        assertTrue(cardCopy >= 0 && metadataCopy > cardCopy && drop > metadataCopy)
+    }
+
+    @Test fun v3MigrationPreservesCiphertextAndAllRemoteAiState() {
+        val cardCopy = MIGRATION_3_4_STATEMENTS.first { it.startsWith("INSERT INTO local_cards") }
+        val metadataCopy = MIGRATION_3_4_STATEMENTS.first { it.startsWith("INSERT INTO sync_metadata") }
+        assertTrue("encryptedRawText" in cardCopy)
+        listOf(
+            "state", "retryCount", "nextRetryAt", "lastErrorCode", "serverCardId",
+            "serverCardStatus", "serverLastError", "aiProvider", "aiModel", "encryptedClientAnalysis",
+        ).forEach { assertTrue("Missing $it", it in metadataCopy) }
+        assertTrue("Discarded captures must become soft-deleted cards", "state = 'DISCARDED'" in cardCopy)
     }
 }

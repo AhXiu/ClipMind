@@ -24,6 +24,9 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
     private suspend fun performUpload(): Result {
         val app = applicationContext as ClipMindApp
         val container = app.container
+        // The current batch endpoint always initiates AI processing and requires plaintext.
+        // AI-off therefore means no upload at all; this is safer than pretending the protocol supports storage-only sync.
+        if (!container.settings.aiEnabled.value) return Result.success()
         val dao = container.database.captureOutboxDao()
         val now = System.currentTimeMillis()
         dao.recoverStaleUploads(now - 10 * 60 * 1000L, now)

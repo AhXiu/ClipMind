@@ -40,15 +40,19 @@ class CaptureRepository(
         .map { entities -> entities.map { it.toUiModel(cipher) } }.flowOn(Dispatchers.Default)
 
     suspend fun capture(rawText: String, sourceApp: String?, mode: CaptureMode, now: Long): CaptureDecision {
-        when (val result = filter.evaluate(rawText, sourceApp)) {
+        when (val result = filter.evaluate(rawText, sourceApp, settings.minimumCaptureLength.value)) {
             is FilterResult.Rejected -> return CaptureDecision.Filtered(result.reason.name)
             FilterResult.Allowed -> Unit
         }
         val normalized = CaptureHash.normalize(rawText)
         val hash = CaptureHash.sha256(normalized)
         val dao = db.captureOutboxDao()
-        if (dao.hashExistsSince(hash, now - 24 * 60 * 60 * 1000L)) return CaptureDecision.Duplicate
-        val state = if (mode == CaptureMode.AUTO) OutboxState.READY else OutboxState.PENDING_CONFIRMATION
+        if (settings.duplicateStrategy.value == DuplicateStrategy.SKIP_24_HOURS &&
+            dao.hashExistsSince(hash, now - 24 * 60 * 60 * 1000L)
+        ) return CaptureDecision.Duplicate
+        // The upload API always requests server-side AI. With AI disabled, LOCAL_ONLY is the only
+        // safe state: plaintext never leaves the device. After AI is enabled, explicit submission changes it to READY.
+        val state = initialCaptureState(mode, settings.aiEnabled.value, settings.aiAutoSubmit.value)
         val entity = try {
             val ai = settings.captureAiConfiguration()
             createEncryptedCaptureEntity(normalized, hash, sourceApp, null, mode, state, now, cipher, ai)
@@ -68,6 +72,13 @@ class CaptureRepository(
     }
 
     suspend fun discard(id: Long): Boolean = db.captureOutboxDao().discard(id, System.currentTimeMillis()) == 1
+}
+
+internal fun initialCaptureState(mode: CaptureMode, aiEnabled: Boolean, aiAutoSubmit: Boolean): OutboxState = when {
+    !aiEnabled -> OutboxState.LOCAL_ONLY
+    !aiAutoSubmit -> OutboxState.PENDING_CONFIRMATION
+    mode == CaptureMode.AUTO -> OutboxState.READY
+    else -> OutboxState.PENDING_CONFIRMATION
 }
 
 internal fun shouldScheduleImmediateUpload(decision: CaptureDecision): Boolean =

@@ -4,8 +4,10 @@ import android.app.Application
 import com.clipmind.android.data.CaptureRepository
 import com.clipmind.android.data.CardRepository
 import com.clipmind.android.data.ClipMindDatabase
+import com.clipmind.android.data.LocalCardRepository
 import com.clipmind.android.data.UserSettings
 import com.clipmind.android.domain.LocalSafetyFilter
+import com.clipmind.android.export.LocalExportService
 import com.clipmind.android.network.CaptureApi
 import com.clipmind.android.network.FixedProviderClient
 import com.clipmind.android.network.HealthChecker
@@ -68,5 +70,7 @@ class AppContainer(app: Application) {
         settings,
     )
     val cardRepository = CardRepository(api, database.captureOutboxDao(), tokenStore)
+    val localCardRepository = LocalCardRepository(database, textCipher)
+    val exportService = LocalExportService()
     val healthChecker = HealthChecker(api)
 }

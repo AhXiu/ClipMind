@@ -9,9 +9,12 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.clipmind.android.ClipMindApp
+import com.clipmind.android.data.DuplicateStrategy
 import com.clipmind.android.domain.CaptureHash
 import com.clipmind.android.domain.RecentHashDeduplicator
 import com.clipmind.android.shizuku.ClipboardReadResult
@@ -105,7 +108,9 @@ class CaptureForegroundService : Service() {
     private suspend fun processClipboardText(text: String) {
         val hash = CaptureHash.sha256(text)
         val now = System.currentTimeMillis()
-        if (deduplicator.isDuplicate(hash, now)) return
+        if (app.container.settings.duplicateStrategy.value == DuplicateStrategy.SKIP_24_HOURS &&
+            deduplicator.isDuplicate(hash, now)
+        ) return
 
         val handling = try {
             handlingFor(app.container.repository.capture(text, null, app.container.settings.mode.value, now))
@@ -114,7 +119,12 @@ class CaptureForegroundService : Service() {
         } catch (error: Exception) {
             handlingForFailure(error)
         }
-        if (handling.commitRecentHash) deduplicator.commit(hash, now)
+        if (handling.commitRecentHash) {
+            deduplicator.commit(hash, now)
+            if (handling.result is CaptureProcessingResult.Stored && app.container.settings.vibrationEnabled.value) {
+                getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        }
         app.container.captureDiagnostics.record(handling.result, now, text.length)
         Log.i(TAG, "event=capture_processed result=${handling.result.logValue()} chars=${text.length}")
     }

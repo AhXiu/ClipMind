@@ -22,11 +22,12 @@ class LocalSafetyFilter(
     private val token = Regex("(?i)(?:bearer\\s+[a-z0-9._~+/-]+=*|(?:access[_-]?token|api[_-]?key|secret)\\s*[:=]\\s*\\S+|(?:ghp|sk)-[a-z0-9_-]{16,}|eyJ[a-z0-9_-]+\\.eyJ[a-z0-9_-]+\\.[a-z0-9_-]+)")
     private val privateKey = Regex("-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
 
-    fun evaluate(rawText: String, sourceApp: String?): FilterResult {
+    fun evaluate(rawText: String, sourceApp: String?, minimumLengthOverride: Int? = null): FilterResult {
         val text = rawText.trim()
+        val effectiveMinimum = minimumLengthOverride?.coerceAtLeast(1) ?: minimumLength
         return when {
             sourceApp?.lowercase() in blocked -> FilterResult.Rejected(FilterReason.BLOCKED_SOURCE)
-            text.length < minimumLength -> FilterResult.Rejected(FilterReason.TOO_SHORT)
+            text.length < effectiveMinimum -> FilterResult.Rejected(FilterReason.TOO_SHORT)
             pureUrl.matches(text) -> FilterResult.Rejected(FilterReason.PURE_URL)
             phone.matches(text.replace(" ", "")) -> FilterResult.Rejected(FilterReason.PHONE_NUMBER)
             nationalId.matches(text) -> FilterResult.Rejected(FilterReason.NATIONAL_ID)
