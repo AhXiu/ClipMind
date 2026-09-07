@@ -17,6 +17,9 @@ import com.google.gson.Gson
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.math.min
+import kotlinx.coroutines.CancellationException
+import com.clipmind.android.domain.LocalSafetyFilter
+import com.clipmind.android.domain.FilterResult
 
 class CaptureUploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = uploadMutex.withLock { performUpload() }
@@ -33,8 +36,36 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         val candidates = dao.eligibleBatch(now, 50)
         if (candidates.isEmpty()) return Result.success()
 
-        val analysisReady = prepareClientAnalysis(candidates, dao, container)
-        if (analysisReady.isEmpty()) return Result.success()
+        var retry = false
+        for (candidate in candidates) {
+            if (!container.settings.aiEnabled.value) break
+            if (dao.claim(candidate.id, candidate.clientCaptureId, System.currentTimeMillis()) != 1) continue
+            if (uploadOne(candidate, dao, container) == Result.retry()) retry = true
+        }
+        return if (retry || dao.eligibleBatch(System.currentTimeMillis(), 1).isNotEmpty()) Result.retry() else Result.success()
+    }
+
+    private suspend fun uploadOne(
+        candidate: CaptureOutboxEntity,
+        dao: CaptureOutboxDao,
+        container: com.clipmind.android.AppContainer,
+    ): Result {
+        // Recheck the current encrypted snapshot before either the provider or backend sees it.
+        val text = try { container.textCipher.decrypt(candidate.encryptedRawText) }
+        catch (e: TextCipherException) {
+            dao.markDecryptionFailed(listOf(candidate.id), System.currentTimeMillis(), "DECRYPT_${e.error.name}")
+            return Result.success()
+        }
+        if (container.safetyFilter.evaluate(text, candidate.sourceApp, container.settings.minimumCaptureLength.value) != FilterResult.Allowed) {
+            dao.markRejected(listOf(candidate.clientCaptureId), System.currentTimeMillis(), "LOCAL_SAFETY_REJECT")
+            return Result.success()
+        }
+        val analysisReady = prepareClientAnalysis(listOf(candidate), dao, container)
+        if (analysisReady.isEmpty()) return Result.retry()
+        if (!container.settings.aiEnabled.value) {
+            markRetry(dao, listOf(candidate), "AI_PAUSED")
+            return Result.success()
+        }
         val prepared = prepareUploadBatch(analysisReady, container.textCipher)
         prepared.failures.groupBy { it.errorCode }.forEach { (code, failures) ->
             dao.markDecryptionFailed(failures.map { it.entity.id }, System.currentTimeMillis(), code)
@@ -42,22 +73,32 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         if (prepared.uploads.isEmpty()) return Result.success()
 
         val batch = prepared.uploads.map { it.entity }
-        dao.markUploading(batch.map { it.id }, now)
         val clientIds = batch.map { it.clientCaptureId }
         val idempotencyKey = BatchRequestMetadata.idempotencyKey(clientIds)
         val authorization = BatchRequestMetadata.authorizationHeader(container.tokenStore.readToken().orEmpty())
         return try {
-            val response = container.api.upload(
+            val response = if (candidate.serverCardId != null) container.api.analyzeAgain(
+                authorization, idempotencyKey, candidate.serverCardId, prepared.uploads.single().item,
+            ) else container.api.upload(
                 authorization = authorization,
                 idempotencyKey = idempotencyKey,
                 request = CaptureBatchRequest(prepared.uploads.map { it.item }),
             )
             if (response.isSuccessful) {
-                handleSuccessfulResponse(dao, batch, response.body())
+                val result = handleSuccessfulResponse(dao, batch, response.body())
+                acceptedCardMappings(batch, response.body() ?: CaptureBatchResponse()).forEach { accepted ->
+                    accepted.cardId?.let { container.cardRepository.refreshServerCard(candidate.id, it) }
+                }
+                result
+            } else if (response.code() in setOf(400, 401, 403, 404, 422)) {
+                dao.markRejected(clientIds, System.currentTimeMillis(), "HTTP_${response.code()}")
+                Result.success()
             } else {
                 markRetry(dao, batch, "HTTP_${response.code()}")
                 Result.retry()
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             markRetry(dao, batch, "NETWORK_${e.javaClass.simpleName}")
             Result.retry()
@@ -111,6 +152,10 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
 
     private suspend fun markAnalysisError(dao: CaptureOutboxDao, entity: CaptureOutboxEntity, code: String) {
         val now = System.currentTimeMillis()
+        if (code in setOf("BYOK_KEY_MISSING", "BYOK_MODEL_MISSING", "BYOK_VALIDATION", "BYOK_AUTH")) {
+            dao.markRejected(listOf(entity.clientCaptureId), now, code)
+            return
+        }
         dao.markAnalysisError(entity.id, now, now + ANALYSIS_RETRY_DELAY_MS, code)
     }
 

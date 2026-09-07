@@ -21,6 +21,9 @@ import com.clipmind.android.worker.WorkManagerImmediateUploadScheduler
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import com.clipmind.android.knowledge.KnowledgeRepository
+import com.clipmind.android.knowledge.KnowledgeClient
+import java.util.concurrent.TimeUnit
 
 class ClipMindApp : Application() {
     lateinit var container: AppContainer
@@ -56,21 +59,24 @@ class AppContainer(app: Application) {
     private val immediateUploadScheduler = WorkManagerImmediateUploadScheduler(app)
     val api: CaptureApi = Retrofit.Builder()
         .baseUrl(BuildConfig.API_BASE_URL)
-        .client(OkHttpClient.Builder().build())
+        .client(OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build())
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(CaptureApi::class.java)
+    val safetyFilter = LocalSafetyFilter(blockedSources = setOf(
+            "com.android.systemui", "com.google.android.apps.authenticator2",
+        ))
     val repository = CaptureRepository(
         database,
-        LocalSafetyFilter(blockedSources = setOf(
-            "com.android.systemui", "com.google.android.apps.authenticator2",
-        )),
+        safetyFilter,
         textCipher,
         immediateUploadScheduler,
         settings,
     )
-    val cardRepository = CardRepository(api, database.captureOutboxDao(), tokenStore)
-    val localCardRepository = LocalCardRepository(database, textCipher)
+    val cardRepository = CardRepository(api, database.captureOutboxDao(), tokenStore, textCipher)
+    val localCardRepository = LocalCardRepository(database, textCipher, safetyFilter)
+    val knowledgeRepository = KnowledgeRepository(database, textCipher, safetyFilter)
+    val knowledgeClient = KnowledgeClient(api)
     val exportService = LocalExportService()
     val healthChecker = HealthChecker(api)
 }

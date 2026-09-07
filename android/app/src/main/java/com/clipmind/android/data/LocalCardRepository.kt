@@ -6,11 +6,15 @@ import com.clipmind.android.export.ExportSnapshot
 import com.clipmind.android.security.TextCipher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import java.util.UUID
+import com.clipmind.android.domain.LocalSafetyFilter
+import com.clipmind.android.domain.FilterResult
+import com.clipmind.android.network.dto.ClientAnalysis
+import com.google.gson.Gson
 
 /** Local-first card API. Cloud ids and AI output remain optional metadata. */
 data class LocalCard(
@@ -24,28 +28,41 @@ data class LocalCard(
     val sourceUrl: String? = null,
     val mode: CaptureMode = CaptureMode.AUTO,
     val sync: SyncMetadataEntity? = null,
+    val analysis: ClientAnalysis? = null,
+    val contentRevision: Long = 1,
 )
 
 class LocalCardRepository(
     private val db: ClipMindDatabase,
     private val cipher: TextCipher,
+    private val safetyFilter: LocalSafetyFilter = LocalSafetyFilter(),
 ) {
     private val dao = db.localCardDao()
 
-    fun observeCards(): Flow<List<LocalCard>> = combine(
-        dao.observeCards(), dao.observeSyncMetadata(),
-    ) { cards, metadata ->
-        val syncByCard = metadata.associateBy { it.cardId }
-        cards.map { decrypt(it, syncByCard[it.card.id]) }
-    }.flowOn(Dispatchers.Default)
+    // One Room transaction keeps new content from briefly pairing with an old AI cache.
+    fun observeCards(): Flow<List<LocalCard>> = dao.observeCards()
+        .map { cards -> cards.map { decrypt(it, it.sync) } }
+        .flowOn(Dispatchers.Default)
 
     suspend fun detail(id: Long): LocalCard? = withContext(Dispatchers.Default) {
-        dao.card(id)?.let { decrypt(it, dao.syncMetadata(id)) }
+        dao.card(id)?.let { decrypt(it, it.sync) }
     }
 
-    suspend fun edit(id: Long, content: String, now: Long = System.currentTimeMillis()): Boolean {
+    suspend fun edit(id: Long, content: String, now: Long = System.currentTimeMillis(), minimumLength: Int = 8): Boolean {
         val normalized = CaptureHash.normalize(content)
-        return dao.edit(id, cipher.encrypt(normalized), CaptureHash.sha256(normalized), now) == 1
+        require(safetyFilter.evaluate(normalized, null, minimumLength) == FilterResult.Allowed) { "内容为空、过短或包含敏感信息" }
+        val encrypted = withContext(Dispatchers.Default) { cipher.encrypt(normalized) }
+        return db.withTransaction {
+            val card = dao.card(id) ?: return@withTransaction false
+            val sync = dao.syncMetadata(id) ?: return@withTransaction false
+            if (!canEditCard(sync.uploadState)) return@withTransaction false
+            if (card.card.hash == CaptureHash.sha256(normalized)) return@withTransaction true
+            if (dao.edit(id, encrypted, CaptureHash.sha256(normalized), now) != 1) return@withTransaction false
+            dao.setTaskId(id, UUID.randomUUID().toString())
+            dao.resetAnalysis(id, OutboxState.LOCAL_ONLY, sync.aiProvider, sync.aiModel, now)
+            dao.invalidateRelations(id, now)
+            true
+        }
     }
 
     suspend fun softDelete(id: Long, now: Long = System.currentTimeMillis()): Boolean =
@@ -57,8 +74,20 @@ class LocalCardRepository(
     suspend fun addTag(cardIds: Set<Long>, name: String, now: Long = System.currentTimeMillis()): Int =
         cardIds.count { addTag(it, name, now) }
 
-    suspend fun queueAi(cardIds: Set<Long>, now: Long = System.currentTimeMillis()): Int =
-        if (cardIds.isEmpty()) 0 else dao.queueAi(cardIds.toList(), now)
+    suspend fun queueAi(cardIds: Set<Long>, config: AiCaptureConfiguration, now: Long = System.currentTimeMillis()): Int =
+        db.withTransaction {
+            cardIds.count { id ->
+                val sync = dao.syncMetadata(id)
+                if (dao.card(id) == null || sync == null || !canQueueAnalysis(sync.uploadState)) false
+                else {
+                    dao.setTaskId(id, UUID.randomUUID().toString())
+                    dao.resetAnalysis(id, OutboxState.READY, config.mode.takeIf { it.isByok }?.providerId, config.model, now)
+                    true
+                }
+            }
+        }
+
+    suspend fun retryAi(ids: Set<Long>): Int = if (ids.isEmpty()) 0 else dao.retryAi(ids.toList())
 
     suspend fun syncMetadata(id: Long): SyncMetadataEntity? = dao.syncMetadata(id)
 
@@ -125,9 +154,25 @@ class LocalCardRepository(
             capturedAt = value.card.capturedAt, updatedAt = value.card.updatedAt,
             sourceApp = value.card.sourceApp, tags = value.tags, sourceUrl = value.card.sourceUrl,
             mode = value.card.mode, sync = sync,
+            analysis = decryptAnalysis(sync, cipher), contentRevision = value.card.contentRevision,
         )
     }
 }
+
+internal fun canEditCard(state: OutboxState): Boolean = state in setOf(
+    OutboxState.LOCAL_ONLY, OutboxState.PENDING_CONFIRMATION, OutboxState.SUCCEEDED, OutboxState.REJECTED,
+)
+
+internal fun canQueueAnalysis(state: OutboxState): Boolean = canEditCard(state)
+
+internal fun decryptAnalysis(sync: SyncMetadataEntity?, cipher: TextCipher): ClientAnalysis? = runCatching {
+    if (sync?.uploadState in setOf(OutboxState.LOCAL_ONLY, OutboxState.PENDING_CONFIRMATION, OutboxState.DECRYPTION_FAILED)) return null
+    val encrypted = sync?.encryptedServerAnalysis ?: sync?.encryptedClientAnalysis ?: return null
+    Gson().fromJson(cipher.decrypt(encrypted), ClientAnalysis::class.java)?.takeIf {
+        it.primaryTag.isNotBlank() && it.interpretation.summary.isNotBlank() &&
+            it.interpretation.insight.isNotBlank() && it.interpretation.action.isNotBlank()
+    }
+}.getOrNull()
 
 internal fun searchDecryptedCards(cards: List<LocalCardEntity>, query: String, cipher: TextCipher): List<LocalCard> =
     cards.mapNotNull { card ->

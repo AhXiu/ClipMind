@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,7 +52,7 @@ fun CaptureHomeScreen(
     onVoiceInput: () -> Unit,
     onOpenShizuku: () -> Unit,
 ) {
-    var manualText by remember { mutableStateOf("") }
+    val manualText = state.manualDraft
     LazyColumn(
         Modifier.fillMaxSize().padding(padding),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
@@ -71,7 +72,7 @@ fun CaptureHomeScreen(
                 )
                 OutlinedTextField(
                     value = manualText,
-                    onValueChange = { manualText = it },
+                    onValueChange = vm::setManualDraft,
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("粘贴或输入一段内容...") },
                     minLines = 3,
@@ -79,10 +80,23 @@ fun CaptureHomeScreen(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
-                        onClick = { vm.addManualText(manualText); manualText = "" },
-                        enabled = manualText.isNotBlank(),
-                    ) { Text("保存卡片") }
+                        onClick = { vm.addManualText(manualText) },
+                        enabled = manualText.isNotBlank() && !state.savingDraft,
+                    ) { Text(if (state.savingDraft) "保存中" else "保存卡片") }
                     OutlinedButton(onVoiceInput) { Text("语音输入") }
+                }
+            }
+        }
+        if (state.pending.isNotEmpty()) {
+            item { SectionHeader("待确认上传 · ${state.pending.size}") }
+            items(state.pending.take(5), key = { "pending-${it.id}" }) { card ->
+                FlatCard(Modifier.fillMaxWidth()) {
+                    Text(card.content, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text("确认后原文将发送至配置的 AI 服务及后端。", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button({ vm.confirm(card.id) }, enabled = card.contentAvailable && state.aiEnabled) { Text("确认上传") }
+                        TextButton({ vm.deleteCards(setOf(card.id)) }) { Text("删除") }
+                    }
                 }
             }
         }
@@ -116,7 +130,17 @@ fun CaptureHomeScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        StatusPill(card.state.name.lowercase().replaceFirstChar { it.uppercase() })
+                        StatusPill(when (card.state) {
+                            com.clipmind.android.data.OutboxState.LOCAL_ONLY -> "仅本地"
+                            com.clipmind.android.data.OutboxState.PENDING_CONFIRMATION -> "待确认上传"
+                            com.clipmind.android.data.OutboxState.READY -> "等待上传"
+                            com.clipmind.android.data.OutboxState.UPLOADING -> "正在处理"
+                            com.clipmind.android.data.OutboxState.SUCCEEDED -> "已上传"
+                            com.clipmind.android.data.OutboxState.RETRYABLE_ERROR -> "等待重试"
+                            com.clipmind.android.data.OutboxState.REJECTED -> "已拒绝"
+                            com.clipmind.android.data.OutboxState.DECRYPTION_FAILED -> "无法解密"
+                            com.clipmind.android.data.OutboxState.DISCARDED -> "已丢弃"
+                        })
                     }
                 }
             }

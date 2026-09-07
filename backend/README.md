@@ -41,6 +41,8 @@ go run ./cmd/server
 - `POST /v1/captures:batch`：批量采集，必须带 `Idempotency-Key`；鉴权开启时还需 `Authorization: Bearer ...`
 - `GET /v1/cards/{card_id}`：查询卡片
 - `GET /v1/cards/{card_id}/versions`：查询不可变版本
+- `POST /v1/knowledge:synthesize`：仅归纳请求中明确选定的 2–8 张卡片，验证原文引用后返回结果及关系候选；无状态、不自动发布，详见 [第二阶段说明](../docs/phase2-knowledge.md)
+- `POST /v1/cards/{card_id}/analyses`：在原卡片上重新生成，提交单条采集结构及新的任务 ID/Idempotency-Key，保留旧版本；结果强制人工确认后同步
 - `POST /v1/cards/{card_id}/confirm`：确认、发布并同步
 - `POST /v1/cards/{card_id}/rollback`：请求体 `{"version_id":"ver_..."}`，切换活动版本并同步
 - `POST /v1/cards/{card_id}/sync:retry`：重试单向同步

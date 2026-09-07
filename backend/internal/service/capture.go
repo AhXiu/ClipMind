@@ -88,6 +88,19 @@ type preparedCapture struct {
 var errReceiptExists = errors.New("receipt already exists")
 
 func (s *Service) Ingest(key string, items []CaptureInput) (BatchResult, error) {
+	return s.ingest(key, items, "")
+}
+
+func (s *Service) AnalyzeAgain(cardID, key string, item CaptureInput) (BatchResult, error) {
+	if key == "" {
+		return BatchResult{}, errors.New("idempotency key is required")
+	}
+	// A regenerated result always requires review before replacing an exported note.
+	item.Mode = "confirm"
+	return s.ingest("analysis:"+cardID+":"+key, []CaptureInput{item}, cardID)
+}
+
+func (s *Service) ingest(key string, items []CaptureInput, targetCardID string) (BatchResult, error) {
 	if key == "" {
 		return BatchResult{}, errors.New("idempotency key is required")
 	}
@@ -146,6 +159,9 @@ func (s *Service) Ingest(key string, items []CaptureInput) (BatchResult, error) 
 			captured = now
 		}
 		cid, cardID := ID("cap_"), ID("card_")
+		if targetCardID != "" {
+			cardID = targetCardID
+		}
 		path, e := s.Backup.Save(cid, []byte(in.RawText))
 		if e != nil {
 			cleanup()
@@ -177,14 +193,25 @@ func (s *Service) Ingest(key string, items []CaptureInput) (BatchResult, error) 
 				return e
 			}
 			if !created {
+				if targetCardID != "" && existing.CardID != targetCardID {
+					return errors.New("analysis task belongs to another card")
+				}
 				duplicates[p.capture.ID] = true
 				out.Accepted = append(out.Accepted, Accepted{ClientCaptureID: p.capture.ClientCaptureID, CaptureID: existing.ID, CardID: existing.CardID, Duplicate: true})
 				continue
 			}
+			if targetCardID != "" {
+				if e = tx.ReplaceCardCapture(targetCardID, p.capture); e != nil {
+					return e
+				}
+			}
 			if e = tx.UpdateCapture(p.capture); e != nil {
 				return e
 			}
-			if e = tx.CreateCard(p.card); e != nil {
+			if targetCardID == "" {
+				e = tx.CreateCard(p.card)
+			}
+			if e != nil {
 				return e
 			}
 			out.Accepted = append(out.Accepted, Accepted{ClientCaptureID: p.capture.ClientCaptureID, CaptureID: p.capture.ID, CardID: p.card.ID})

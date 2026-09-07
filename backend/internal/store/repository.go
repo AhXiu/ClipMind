@@ -14,6 +14,7 @@ type Transaction interface {
 	UpdateCapture(c domain.Capture) error
 	CreateCard(c domain.Card) error
 	UpdateCard(c domain.Card) error
+	ReplaceCardCapture(cardID string, capture domain.Capture) error
 	AddVersion(v domain.CardVersion) (domain.CardVersion, error)
 }
 

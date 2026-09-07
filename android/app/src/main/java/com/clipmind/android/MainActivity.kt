@@ -13,7 +13,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import com.clipmind.android.ui.ClipMindAppRoot
 import com.clipmind.android.ui.ClipMindTheme
@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private val speech = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(viewModel::addManualText)
+        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { viewModel.importDraft(it) }
     }
     private val zipDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { it?.let { uri -> viewModel.export(uri, ExportFormat.OBSIDIAN_ZIP) } }
     private val csvDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { it?.let { uri -> viewModel.export(uri, ExportFormat.CSV) } }
@@ -34,9 +34,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        acceptSharedText(intent)
+        if (savedInstanceState == null) acceptSharedText(intent)
         setContent {
-            val state by viewModel.uiState.collectAsState()
+            val state by viewModel.uiState.collectAsStateWithLifecycle()
             ClipMindTheme {
                 ClipMindAppRoot(
                     state = state,
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
 
     private fun acceptSharedText(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf(String::isNotBlank)?.let(viewModel::addManualText)
+            intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf(String::isNotBlank)?.let { viewModel.importDraft(it) }
         }
     }
 

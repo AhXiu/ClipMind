@@ -6,9 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ServerCardActionPolicyTest {
-    @Test fun onlyConfirmAwaitingConfirmShowsPublishAction() {
+    @Test fun regeneratedAutoCardAlsoRequiresExplicitConfirmation() {
         assertTrue(shouldShowPublishAction(CaptureMode.CONFIRM, "awaiting_confirm"))
-        assertFalse(shouldShowPublishAction(CaptureMode.AUTO, "awaiting_confirm"))
+        assertTrue(shouldShowPublishAction(CaptureMode.AUTO, "awaiting_confirm"))
         assertFalse(shouldShowPublishAction(CaptureMode.CONFIRM, "persisted"))
         assertFalse(shouldShowPublishAction(CaptureMode.CONFIRM, "ai_running"))
         assertFalse(shouldShowPublishAction(CaptureMode.CONFIRM, "synced"))

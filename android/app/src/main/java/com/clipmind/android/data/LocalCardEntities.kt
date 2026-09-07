@@ -7,8 +7,9 @@ import androidx.room.PrimaryKey
 import androidx.room.Embedded
 import androidx.room.Junction
 import androidx.room.Relation
+import androidx.room.ColumnInfo
 
-enum class RelationStatus { CANDIDATE, CONFIRMED, REJECTED }
+enum class RelationStatus { CANDIDATE, CONFIRMED, REJECTED, STALE }
 
 @Entity(
     tableName = "local_cards",
@@ -25,6 +26,7 @@ data class LocalCardEntity(
     val capturedAt: Long,
     val updatedAt: Long,
     val deletedAt: Long? = null,
+    @ColumnInfo(defaultValue = "1") val contentRevision: Long = 1,
 )
 
 @Entity(
@@ -50,6 +52,7 @@ data class SyncMetadataEntity(
     val aiProvider: String? = null,
     val aiModel: String? = null,
     val encryptedClientAnalysis: String? = null,
+    val encryptedServerAnalysis: String? = null,
 )
 
 @Entity(tableName = "tags", indices = [Index(value = ["normalizedName"], unique = true)])
@@ -91,6 +94,17 @@ data class CardRelationEntity(
     val status: RelationStatus = RelationStatus.CANDIDATE,
     val createdAt: Long,
     val updatedAt: Long,
+    val encryptedEvidence: String? = null,
+    @ColumnInfo(defaultValue = "0") val sourceRevision: Long = 0,
+    @ColumnInfo(defaultValue = "0") val targetRevision: Long = 0,
+    @ColumnInfo(defaultValue = "'manual'") val origin: String = "manual",
+)
+
+@Entity(tableName = "knowledge_notes")
+data class KnowledgeNoteEntity(
+    @PrimaryKey val id: String,
+    val encryptedPayload: String,
+    val createdAt: Long,
 )
 
 data class LocalCardWithTags(
@@ -101,4 +115,6 @@ data class LocalCardWithTags(
         associateBy = Junction(CardTagRefEntity::class, parentColumn = "cardId", entityColumn = "tagId"),
     )
     val tags: List<TagEntity>,
+    @Relation(parentColumn = "id", entityColumn = "cardId")
+    val sync: SyncMetadataEntity? = null,
 )

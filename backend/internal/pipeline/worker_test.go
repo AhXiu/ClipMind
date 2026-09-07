@@ -1,9 +1,11 @@
 package pipeline
 
 import (
+	"bytes"
 	"clipmind/backend/internal/domain"
 	"clipmind/backend/internal/llm"
 	"clipmind/backend/internal/metrics"
+	"clipmind/backend/internal/security"
 	"clipmind/backend/internal/service"
 	"clipmind/backend/internal/store"
 	"clipmind/backend/internal/syncer"
@@ -14,6 +16,61 @@ import (
 	"testing"
 	"time"
 )
+
+func TestReanalysisCreatesVersionWithoutOverwritingVaultBeforeConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := store.OpenFile(filepath.Join(dir, "store.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := security.NewEncryptedFileBackup(filepath.Join(dir, "backups"), bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(repo, security.NewSafeFilter(1000), backup)
+	vault := filepath.Join(dir, "vault")
+	cards := service.Cards{Repo: repo, Sync: syncer.Obsidian{Vault: vault}}
+	w := Worker{Repo: repo, LLM: llm.Deterministic{}, Books: noBooks{}, Metrics: metrics.New(), Cards: cards}
+	result, err := svc.Ingest("initial", []service.CaptureInput{{ClientCaptureID: "original", RawText: "Go original excerpt", Mode: "auto"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := result.Accepted[0].CardID
+	if err = w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(vault, id+".md")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.AnalyzeAgain(id, "new-job", service.CaptureInput{ClientCaptureID: "new-task", RawText: "Go revised excerpt", Mode: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	card, _ := repo.GetCard(id)
+	versions, _ := repo.ListVersions(id)
+	if card.Status != domain.StatusAwaitingConfirm || len(versions) != 2 || versions[1].Number != 2 {
+		t.Fatalf("invalid regeneration: card=%+v versions=%d", card, len(versions))
+	}
+	unchanged, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(original, unchanged) {
+		t.Fatal("unconfirmed result overwrote existing note", err)
+	}
+	if _, err := cards.Confirm(id); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil || bytes.Equal(original, updated) {
+		t.Fatal("confirmed version was not written", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(vault, "*.md"))
+	if len(files) != 1 {
+		t.Fatal("regeneration created a duplicate Obsidian card")
+	}
+}
 
 type noBooks struct{}
 

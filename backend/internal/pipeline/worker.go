@@ -73,6 +73,13 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	return nil
 }
 func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
+	current, err := w.Repo.GetCard(c.CardID)
+	if err != nil {
+		return err
+	}
+	if current.CaptureID != c.ID {
+		return store.ErrStaleWork
+	}
 	if c.Status == domain.StatusPublished {
 		cards := w.Cards
 		if cards.Repo == nil {

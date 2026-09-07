@@ -2,11 +2,30 @@ package llm
 
 import (
 	"clipmind/backend/internal/domain"
+	"clipmind/backend/internal/knowledge"
 	"context"
+	"encoding/json"
 	"strings"
 )
 
 type Deterministic struct{}
+
+func (Deterministic) CompleteJSON(_ context.Context, _, user string) (string, error) {
+	var input knowledge.Request
+	if err := json.Unmarshal([]byte(user), &input); err != nil {
+		return "", err
+	}
+	result := knowledge.Result{Title: "本地测试归纳（非模型推理）", Points: []knowledge.Point{}, Relations: []knowledge.Relation{}}
+	for _, card := range input.Cards {
+		quote := []rune(card.Text)
+		if len(quote) > 200 {
+			quote = quote[:200]
+		}
+		result.Points = append(result.Points, knowledge.Point{Kind: "summary", Text: string(quote), Evidence: []knowledge.Evidence{{CardID: card.ID, Quote: string(quote)}}})
+	}
+	data, err := json.Marshal(result)
+	return string(data), err
+}
 
 func (Deterministic) Name() string  { return "deterministic" }
 func (Deterministic) Model() string { return "deterministic" }

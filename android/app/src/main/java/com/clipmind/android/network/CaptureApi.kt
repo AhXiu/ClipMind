@@ -11,6 +11,24 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface CaptureApi {
+    @POST("v1/knowledge:synthesize")
+    suspend fun synthesize(
+        @Header("Authorization") authorization: String?,
+        @Body request: com.clipmind.android.knowledge.KnowledgeRequest,
+    ): Response<com.clipmind.android.knowledge.KnowledgeResponse>
+    @GET("v1/cards/{cardId}/versions")
+    suspend fun getVersions(
+        @Header("Authorization") authorization: String?,
+        @Path("cardId") cardId: String,
+    ): Response<List<com.clipmind.android.network.dto.ServerCardVersion>>
+
+    @POST("v1/cards/{cardId}/analyses")
+    suspend fun analyzeAgain(
+        @Header("Authorization") authorization: String?,
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Path("cardId") cardId: String,
+        @Body request: com.clipmind.android.network.dto.CaptureUploadItem,
+    ): Response<CaptureBatchResponse>
     @GET("health")
     suspend fun health(): Response<com.clipmind.android.network.dto.HealthResponse>
 

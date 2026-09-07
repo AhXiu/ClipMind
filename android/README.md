@@ -64,6 +64,12 @@ Manifest 仅声明联网、通知和前台服务（含 Android 14 `specialUse` �
 
 ## 测试
 
+第二阶段支持本地关键词关联、选定多卡归纳、加密主题笔记与原文引用跳转。Room v6 增加关系证据和主题笔记表，保留完整显式迁移链。使用和隐私边界见 [知识能力说明](../docs/phase2-knowledge.md)。
+
+新增的 Room v5 迁移和任务回写 SQL 可在没有 Android SDK 的机器上运行 `python3 scripts/check_migration.py`，使用内存 SQLite 检查密文保留、任务抢占和旧响应隔离。该检查不能替代真机 Room schema 校验。
+
+详情页支持服务端/BYOK 分析结果离线展示。编辑正文后旧分析失效；“重试原任务”保留任务 ID，“重新生成 AI”创建新任务但仍使用原云端卡片。草稿仅保留在 ViewModel 内存中，不写入明文 Bundle。完整边界见 [第一阶段优化说明](../docs/phase1-optimization.md)。
+
 JVM 单元测试覆盖：
 
 - 本地安全过滤规则及 reason；

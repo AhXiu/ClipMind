@@ -132,3 +132,27 @@ func TestBatchAPIClientAnalysisValidationAndNoClientKey(t *testing.T) {
 		t.Fatalf("client key field was not safely rejected: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestReanalysisRequiresAuthenticationAndIdempotency(t *testing.T) {
+	s := Server{Metrics: metrics.New(), Token: "test-token", Log: log.New(io.Discard, "", 0)}
+	for _, tc := range []struct {
+		auth, key, body string
+		want            int
+	}{
+		{"", "job", `{}`, http.StatusUnauthorized},
+		{"Bearer test-token", "", `{}`, http.StatusBadRequest},
+		{"Bearer test-token", "job", `{"client_capture_id":"task","api_key":"must-not-enter-backend"}`, http.StatusBadRequest},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/cards/card-test/analyses", strings.NewReader(tc.body))
+		req.Header.Set("Authorization", tc.auth)
+		req.Header.Set("Idempotency-Key", tc.key)
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, req)
+		if rr.Code != tc.want {
+			t.Fatalf("status=%d want=%d", rr.Code, tc.want)
+		}
+		if strings.Contains(rr.Body.String(), "must-not-enter-backend") {
+			t.Fatal("sensitive input leaked")
+		}
+	}
+}

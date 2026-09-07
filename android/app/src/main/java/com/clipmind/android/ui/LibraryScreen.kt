@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
+import com.clipmind.android.data.analysisState
+import com.clipmind.android.data.CardAnalysisState
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -102,6 +104,7 @@ fun LibraryScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Button({ showTag = true }) { Text("加标签") }
                             OutlinedButton({ vm.queueAi(selected); selected = emptySet() }) { Text("提交 AI") }
+                            OutlinedButton({ vm.knowledge.prepare(selected) }, enabled = selected.size in 2..8 && !state.knowledge.running && state.aiEnabled) { Text("多卡归纳") }
                             TextButton({ vm.deleteCards(selected); selected = emptySet() }) { Text("删除") }
                             TextButton({ selected = emptySet() }) { Text("取消") }
                         }
@@ -131,7 +134,7 @@ fun LibraryScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues)
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            StatusPill(card.sync.aiLabel(), positive = card.sync?.encryptedClientAnalysis != null)
+                            StatusPill(card.sync.aiLabel(), positive = card.sync.analysisState() == CardAnalysisState.COMPLETE)
                             card.tags.firstOrNull()?.let { StatusPill("#${it.name}") }
                         }
                     }
@@ -140,28 +143,23 @@ fun LibraryScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues)
             item { Spacer(Modifier.height(72.dp)) }
         }
     }
-    if (showAdd) TextEntryDialog("新增卡片", { showAdd = false }, { vm.addManualText(it); showAdd = false })
+    if (showAdd) TextEntryDialog("新增卡片", { showAdd = false }, { vm.addManualText(it) { showAdd = false } }, state.manualDraft, vm::setManualDraft)
     if (showTag) TextEntryDialog("为 ${selected.size} 张卡片添加标签", { showTag = false }, { vm.addTag(selected, it); selected = emptySet(); showTag = false })
 }
 
 private fun Set<Long>.toggle(id: Long) = if (id in this) this - id else this + id
 private fun CardTimeFilter.label() = when (this) { CardTimeFilter.ALL -> "全部时间"; CardTimeFilter.TODAY -> "24 小时"; CardTimeFilter.WEEK -> "7 天" }
 private fun CardAiFilter.label() = when (this) { CardAiFilter.ALL -> "全部"; CardAiFilter.PENDING -> "待处理"; CardAiFilter.COMPLETE -> "已完成"; CardAiFilter.FAILED -> "异常" }
-internal fun com.clipmind.android.data.SyncMetadataEntity?.aiLabel(): String = when {
-    this == null -> "仅本地"
-    encryptedClientAnalysis != null -> "AI 已完成"
-    lastErrorCode != null -> "处理异常"
-    aiProvider != null -> "等待 AI"
-    else -> "服务端处理"
-}
+internal fun com.clipmind.android.data.SyncMetadataEntity?.aiLabel(): String = analysisState().label
 
 @Composable
-fun TextEntryDialog(title: String, dismiss: () -> Unit, submit: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
+fun TextEntryDialog(title: String, dismiss: () -> Unit, submit: (String) -> Unit, draft: String? = null, onDraftChange: ((String) -> Unit)? = null) {
+    var localText by remember { mutableStateOf("") }
+    val text = draft ?: localText
     AlertDialog(
         onDismissRequest = dismiss,
         title = { Text(title) },
-        text = { OutlinedTextField(text, { text = it }, label = { Text("内容") }, minLines = 2, shape = RoundedCornerShape(14.dp)) },
+        text = { OutlinedTextField(text, { if (onDraftChange != null) onDraftChange(it) else localText = it }, label = { Text("内容") }, minLines = 2, shape = RoundedCornerShape(14.dp)) },
         confirmButton = { TextButton({ submit(text) }, enabled = text.isNotBlank()) { Text("确定") } },
         dismissButton = { TextButton(dismiss) { Text("取消") } },
     )

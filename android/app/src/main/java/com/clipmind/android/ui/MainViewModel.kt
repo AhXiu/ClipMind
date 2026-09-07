@@ -18,6 +18,8 @@ import com.clipmind.android.worker.UploadScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.clipmind.android.knowledge.RelationEvidence
+import com.clipmind.android.network.BatchRequestMetadata
 
 enum class AppTab(val title: String, val label: String, val subtitle: String) {
     CAPTURE("采集", "采集", "随手记录，沉淀想法"),
@@ -34,7 +36,7 @@ sealed interface CardOperationUiState { data object Working : CardOperationUiSta
 sealed interface ExportUiState { data object Idle : ExportUiState; data object Running : ExportUiState; data class Success(val cardCount: Int) : ExportUiState; data class Failed(val reason: String) : ExportUiState }
 
 internal fun shouldShowPublishAction(mode: CaptureMode, serverCardStatus: String?): Boolean =
-    mode == CaptureMode.CONFIRM && serverCardStatus == "awaiting_confirm"
+    serverCardStatus == "awaiting_confirm"
 
 internal fun filterCards(
     cards: List<LocalCard>, query: String, source: String?, time: CardTimeFilter,
@@ -47,12 +49,15 @@ internal fun filterCards(
         .filter {
             when (ai) {
                 CardAiFilter.ALL -> true
-                CardAiFilter.PENDING -> it.sync?.encryptedClientAnalysis == null && it.sync?.aiProvider != null
-                CardAiFilter.COMPLETE -> it.sync?.encryptedClientAnalysis != null
-                CardAiFilter.FAILED -> it.sync?.lastErrorCode != null
+                CardAiFilter.PENDING -> it.sync.analysisState() in setOf(CardAnalysisState.CONFIRM, CardAnalysisState.QUEUED, CardAnalysisState.RUNNING)
+                CardAiFilter.COMPLETE -> it.sync.analysisState() == CardAnalysisState.COMPLETE
+                CardAiFilter.FAILED -> it.sync.analysisState() in setOf(CardAnalysisState.FAILED, CardAnalysisState.UNREADABLE) ||
+                    it.sync?.uploadState == OutboxState.RETRYABLE_ERROR || it.sync?.serverLastError != null
             }
         }.let { if (ascending) it.sortedBy(LocalCard::capturedAt) else it.sortedByDescending(LocalCard::capturedAt) }.toList()
 }
+
+data class CardEditDraft(val cardId: Long, val content: String)
 
 data class MainUiState(
     val shizukuState: ShizukuState = ShizukuState.UNAVAILABLE,
@@ -86,18 +91,41 @@ data class MainUiState(
     val aiEnabled: Boolean = true,
     val aiAutoSubmit: Boolean = true,
     val message: String? = null,
+    val manualDraft: String = "",
+    val editDraft: CardEditDraft? = null,
+    val pendingDeletion: Set<Long> = emptySet(),
+    val pullingResults: Boolean = false,
+    val savingDraft: Boolean = false,
+    val knowledge: KnowledgeUiState = KnowledgeUiState(),
+    val relationEvidence: Map<Long, RelationEvidence> = emptyMap(),
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as ClipMindApp
     private val container = app.container
     private val connectionState = MutableStateFlow<ConnectionUiState>(ConnectionUiState.Idle)
     private val aiConnectionState = MutableStateFlow<AiConnectionUiState>(AiConnectionUiState.Idle)
     private val cardOperations = MutableStateFlow<Map<Long, CardOperationUiState>>(emptyMap())
-    private val selectedCard = MutableStateFlow<LocalCard?>(null)
-    private val selectedRelations = MutableStateFlow<List<CardRelationEntity>>(emptyList())
+    private val selectedCardId = MutableStateFlow<Long?>(null)
+    private val selectedRelations = selectedCardId.flatMapLatest { id ->
+        if (id == null) flowOf(emptyList()) else container.localCardRepository.observeRelations(id)
+    }
+    // Draft text stays in memory, not plaintext SavedState/Bundle persistence.
+    private val manualDraft = MutableStateFlow("")
+    private val editDraft = MutableStateFlow<CardEditDraft?>(null)
+    private val pendingDeletion = MutableStateFlow<Set<Long>>(emptySet())
+    private val pullingResults = MutableStateFlow(false)
+    private val savingDraft = MutableStateFlow(false)
     private val message = MutableStateFlow<String?>(null)
     private val exportState = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
+    val knowledge = KnowledgeController(
+        viewModelScope, container.knowledgeRepository, container.knowledgeClient,
+        { container.settings.captureAiConfiguration() }, { container.settings.aiEnabled.value },
+        { container.apiKeyStore.readForAuthorization() },
+        { BatchRequestMetadata.authorizationHeader(container.tokenStore.readToken().orEmpty()) },
+        { message.value = it },
+    )
 
     private val baseState = combine(
         container.shizuku.state, container.settings.captureRequested, container.settings.mode,
@@ -116,9 +144,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .combine(container.settings.openRouterModel) { state, value -> state.copy(openRouterModel = value) }
         .combine(container.apiKeyStore.configured) { state, value -> state.copy(apiKeyConfigured = value) }
         .combine(aiConnectionState) { state, value -> state.copy(aiConnectionState = value) }
-        .combine(selectedCard) { state, value -> state.copy(selectedCard = value) }
-        .combine(selectedRelations) { state, value -> state.copy(selectedRelations = value) }
+        .combine(selectedCardId) { state, value -> state.copy(selectedCard = state.localCards.firstOrNull { it.id == value }) }
+        .combine(selectedRelations.map { it to container.knowledgeRepository.decodeEvidence(it) }.flowOn(Dispatchers.Default)) { state, value ->
+            val activeIds = state.localCards.map { it.id }.toSet()
+            state.copy(selectedRelations = value.first.filter { it.sourceCardId in activeIds && it.targetCardId in activeIds }, relationEvidence = value.second)
+        }
+        .combine(knowledge.state) { state, value -> state.copy(knowledge = value) }
         .combine(message) { state, value -> state.copy(message = value) }
+        .combine(manualDraft) { state, value -> state.copy(manualDraft = value) }
+        .combine(editDraft) { state, value -> state.copy(editDraft = value) }
+        .combine(pendingDeletion) { state, value -> state.copy(pendingDeletion = value) }
+        .combine(pullingResults) { state, value -> state.copy(pullingResults = value) }
+        .combine(savingDraft) { state, value -> state.copy(savingDraft = value) }
         .combine(exportState) { state, value -> state.copy(exportState = value) }
         .combine(container.settings.markdownTemplate) { state, value -> state.copy(markdownTemplate = value) }
         .combine(container.settings.wikiLinkFormat) { state, value -> state.copy(wikiLinkFormat = value) }
@@ -157,32 +194,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun confirm(id: Long) = viewModelScope.launch { container.repository.confirm(id) }
     fun discard(id: Long) = viewModelScope.launch { container.repository.discard(id) }
 
-    fun addManualText(text: String) = viewModelScope.launch {
+    fun setManualDraft(text: String) { manualDraft.value = text }
+    fun importDraft(text: String) {
+        manualDraft.value = if (manualDraft.value.isBlank()) text else manualDraft.value + "\n\n" + text
+    }
+    fun beginEditing(card: LocalCard) { editDraft.value = CardEditDraft(card.id, card.content) }
+    fun setEditDraft(text: String) { editDraft.value = editDraft.value?.copy(content = text) }
+    fun cancelEditing() { editDraft.value = null }
+    fun clearMessage(value: String) { if (message.value == value) message.value = null }
+
+    fun addManualText(text: String, onSaved: () -> Unit = {}) = viewModelScope.launch {
+        if (savingDraft.value) return@launch
+        savingDraft.value = true
+        try {
         message.value = when (val result = container.repository.capture(text, "manual", CaptureMode.CONFIRM, System.currentTimeMillis())) {
-            is CaptureDecision.Stored -> "已保存到本地卡片库"
+            is CaptureDecision.Stored -> {
+                if (manualDraft.value == text) manualDraft.value = ""
+                onSaved()
+                "已保存到本地卡片库"
+            }
             CaptureDecision.Duplicate -> "最近已存在相同内容"
             is CaptureDecision.Filtered -> "内容未保存：${result.reason}"
             is CaptureDecision.EncryptionFailed -> "加密失败：${result.code}"
         }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { message.value = "保存失败，草稿已保留，请重试" }
+        finally { savingDraft.value = false }
     }
 
     fun openCard(id: Long) = viewModelScope.launch { reloadCard(id) }
-    fun closeCard() { selectedCard.value = null; selectedRelations.value = emptyList() }
-    fun editCard(id: Long, text: String) = viewModelScope.launch { container.localCardRepository.edit(id, text); reloadCard(id) }
-    fun deleteCards(ids: Set<Long>) = viewModelScope.launch { container.localCardRepository.softDelete(ids); if (selectedCard.value?.id in ids) closeCard() }
-    fun addTag(ids: Set<Long>, tag: String) = viewModelScope.launch { container.localCardRepository.addTag(ids, tag); selectedCard.value?.id?.takeIf(ids::contains)?.let { reloadCard(it) } }
+    fun closeCard() { selectedCardId.value = null; editDraft.value = null }
+    fun editCard(id: Long, text: String) = viewModelScope.launch {
+        try {
+            if (container.localCardRepository.edit(id, text, minimumLength = container.settings.minimumCaptureLength.value)) {
+                editDraft.value = null
+                message.value = "已保存；内容变更后的旧分析已失效，请重新提交"
+            } else message.value = "任务正在处理，请完成后再编辑"
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { message.value = "保存失败：请检查内容长度和敏感信息，原草稿已保留" }
+    }
+    fun deleteCards(ids: Set<Long>) { pendingDeletion.value = ids }
+    fun cancelDeletion() { pendingDeletion.value = emptySet() }
+    fun confirmDeletion() = viewModelScope.launch {
+        val ids = pendingDeletion.value
+        container.localCardRepository.softDelete(ids)
+        pendingDeletion.value = emptySet()
+        if (selectedCardId.value in ids) closeCard()
+        message.value = "已删除本地卡片；已上传或导出的副本不受影响"
+    }
+    fun addTag(ids: Set<Long>, tag: String) = viewModelScope.launch { container.localCardRepository.addTag(ids, tag) }
     fun queueAi(ids: Set<Long>) = viewModelScope.launch {
         if (!container.settings.aiEnabled.value) {
             message.value = "AI 已关闭，请先在设置中启用"
             return@launch
         }
-        val changed = container.localCardRepository.queueAi(ids)
+        val changed = container.localCardRepository.queueAi(ids, container.settings.captureAiConfiguration())
         if (changed > 0) { UploadScheduler.scheduleImmediate(app); message.value = "已提交 $changed 张卡片" }
         else message.value = "当前卡片尚不可重新提交"
     }
+    fun retryAi(ids: Set<Long>) = viewModelScope.launch {
+        if (!container.settings.aiEnabled.value) { message.value = "请先启用 AI"; return@launch }
+        val changed = container.localCardRepository.retryAi(ids)
+        if (changed > 0) { UploadScheduler.scheduleImmediate(app); message.value = "已安排失败任务重试" }
+    }
     fun resolveRelation(id: Long, confirm: Boolean) = viewModelScope.launch {
-        if (confirm) container.localCardRepository.confirmRelation(id) else container.localCardRepository.ignoreRelation(id)
-        selectedCard.value?.id?.let { reloadCard(it) }
+        val changed = if (confirm) container.localCardRepository.confirmRelation(id) else container.localCardRepository.ignoreRelation(id)
+        message.value = if (!changed) "来源或关系状态已变化，请重新检索" else if (confirm) "关系已确认，可随 Obsidian ZIP 导出双链" else "已忽略，这对卡片不会重复推荐"
     }
     fun export(uri: Uri, format: ExportFormat) {
         if (exportState.value == ExportUiState.Running) return
@@ -204,15 +281,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun uploadNow() { UploadScheduler.scheduleImmediate(app); message.value = "已安排上传；结果以实际同步状态为准" }
     fun showMessage(value: String) { message.value = value }
     fun pullAiResults() = viewModelScope.launch {
-        val cards = uiState.value.localCards.filter { it.sync?.serverCardId != null }
+        if (pullingResults.value) return@launch
+        pullingResults.value = true
+        try {
+        val cards = uiState.value.localCards.filter { it.sync?.serverCardId != null && it.sync.uploadState == OutboxState.SUCCEEDED }
         if (cards.isEmpty()) message.value = "暂无可拉取的服务端卡片"
-        cards.forEach { card -> card.sync?.serverCardId?.let { container.cardRepository.refreshServerCard(card.id, it) } }
-        if (cards.isNotEmpty()) message.value = "已完成 ${cards.size} 张卡片状态拉取"
+        val successful = cards.count { card -> container.cardRepository.refreshServerCard(card.id, card.sync!!.serverCardId!!) is ServerCardOperationResult.Success }
+        if (cards.isNotEmpty()) message.value = "已刷新 $successful/${cards.size} 张卡片；失败项可再次刷新"
+        } finally { pullingResults.value = false }
     }
 
     private suspend fun reloadCard(id: Long) {
-        selectedCard.value = container.localCardRepository.detail(id)
-        selectedRelations.value = container.localCardRepository.relations(id)
+        selectedCardId.value = id
     }
 
     fun testModelConnection() {

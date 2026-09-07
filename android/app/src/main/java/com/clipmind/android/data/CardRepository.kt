@@ -10,6 +10,9 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.Response
+import com.clipmind.android.security.TextCipher
+import com.clipmind.android.network.dto.ClientAnalysis
+import com.google.gson.Gson
 
 sealed interface ServerCardOperationResult {
     data class Success(val card: ServerCard) : ServerCardOperationResult
@@ -20,6 +23,7 @@ class CardRepository(
     private val api: CaptureApi,
     private val dao: CaptureOutboxDao,
     private val tokenStore: TokenStore,
+    private val cipher: TextCipher,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     suspend fun refreshServerCard(id: Long, cardId: String): ServerCardOperationResult =
@@ -33,26 +37,40 @@ class CardRepository(
         cardId: String,
         request: suspend (String?) -> Response<ServerCard>,
     ): ServerCardOperationResult = withContext(ioDispatcher) {
+        val taskId = dao.serverReadTask(id, cardId)
+            ?: return@withContext ServerCardOperationResult.Failure("STALE_ANALYSIS_TASK")
         try {
             val response = request(BatchRequestMetadata.authorizationHeader(tokenStore.readToken().orEmpty()))
             if (!response.isSuccessful) {
                 val code = classifyServerCardHttpError(response.code())
-                dao.updateServerCardError(id, cardId, code, System.currentTimeMillis())
+                dao.updateServerCardError(id, cardId, taskId, code, System.currentTimeMillis())
                 return@withContext ServerCardOperationResult.Failure(code)
             }
             val card = response.body()
-            if (card == null) {
+            if (card == null || card.id != cardId) {
                 val code = "NETWORK_EMPTY_RESPONSE"
-                dao.updateServerCardError(id, cardId, code, System.currentTimeMillis())
+                dao.updateServerCardError(id, cardId, taskId, code, System.currentTimeMillis())
                 return@withContext ServerCardOperationResult.Failure(code)
             }
-            dao.updateServerCard(id, cardId, card.status, card.lastError, System.currentTimeMillis())
+            val analysis = if (card.activeVersionId != null) {
+                val versions = api.getVersions(BatchRequestMetadata.authorizationHeader(tokenStore.readToken().orEmpty()), cardId)
+                val version = versions.body()?.firstOrNull { it.id == card.activeVersionId && it.cardId == cardId }
+                if (!versions.isSuccessful || version == null || version.interpretation.summary.isBlank() ||
+                    version.interpretation.insight.isBlank() || version.interpretation.action.isBlank()) {
+                    dao.updateServerCardError(id, cardId, taskId, "ANALYSIS_RESULT_UNAVAILABLE", System.currentTimeMillis())
+                    return@withContext ServerCardOperationResult.Failure("ANALYSIS_RESULT_UNAVAILABLE")
+                }
+                cipher.encrypt(Gson().toJson(ClientAnalysis(version.provider, version.model, version.primaryTag, version.interpretation, emptyList())))
+            } else null
+            if (dao.updateServerCard(id, cardId, taskId, card.status, card.lastError, analysis, System.currentTimeMillis()) != 1) {
+                return@withContext ServerCardOperationResult.Failure("STALE_ANALYSIS_TASK")
+            }
             ServerCardOperationResult.Success(card)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (throwable: Throwable) {
             val code = classifyServerCardNetworkError(throwable)
-            dao.updateServerCardError(id, cardId, code, System.currentTimeMillis())
+            dao.updateServerCardError(id, cardId, taskId, code, System.currentTimeMillis())
             ServerCardOperationResult.Failure(code)
         }
     }

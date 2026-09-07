@@ -20,29 +20,51 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.clipmind.android.data.OutboxState
+import com.clipmind.android.data.analysisState
+import com.clipmind.android.data.CardAnalysisState
+import com.clipmind.android.data.syncLabel
 import com.clipmind.android.export.ExportFormat
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues, onExport: (ExportFormat) -> Unit) {
     val pending = state.localCards.filter {
-        it.sync?.encryptedClientAnalysis == null && it.sync?.uploadState in setOf(
-            OutboxState.READY,
-            OutboxState.RETRYABLE_ERROR,
-            OutboxState.UPLOADING,
-            OutboxState.SUCCEEDED,
-        )
+        it.sync.analysisState() in setOf(CardAnalysisState.CONFIRM, CardAnalysisState.QUEUED, CardAnalysisState.RUNNING, CardAnalysisState.FAILED) ||
+            it.sync?.uploadState == OutboxState.RETRYABLE_ERROR || it.sync?.serverLastError != null
     }
     LazyColumn(
         Modifier.fillMaxSize().padding(padding),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        item {
+            FlatCard(Modifier.fillMaxWidth()) {
+                Text("从摘录到主题笔记", style = MaterialTheme.typography.titleLarge)
+                Text("在卡片库长按选择 2–8 张卡片，点击「多卡归纳」。提交前可核对全文，结果包含原文引用与关系候选。")
+                if (state.knowledge.running) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text("正在归纳选定卡片，不会自动重试")
+                    TextButton(vm.knowledge::cancel) { Text("取消等待") }
+                }
+            }
+        }
+        item { SectionHeader("主题笔记 · 最近 50 份") }
+        if (state.knowledge.notes.isEmpty()) item { EmptyState("尚无主题笔记", "选中相关摘录，比较共同观点、分歧和待验证问题") }
+        items(state.knowledge.notes, key = { "knowledge-${it.id}" }) { note ->
+            Card(onClick = { vm.knowledge.openNote(note.id) }, modifier = Modifier.fillMaxWidth()) {
+                androidx.compose.foundation.layout.Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(note.payload?.response?.result?.title ?: "笔记无法解密", style = MaterialTheme.typography.titleMedium)
+                    Text(if (note.stale) "来源已变化 · 历史快照" else "${note.payload?.input?.cards?.size ?: 0} 张卡片 · 引用可追溯", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         item {
             Card(
                 Modifier.fillMaxWidth(),
@@ -64,14 +86,14 @@ fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingVal
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(vm::uploadNow) { Text("立即处理") }
-                        OutlinedButton(vm::pullAiResults) { Text("刷新状态") }
+                        OutlinedButton({ vm.pullAiResults() }, enabled = !state.pullingResults) { Text(if (state.pullingResults) "刷新中" else "获取 AI 结果") }
                     }
                 }
             }
         }
         item { SectionHeader("待处理卡片") }
         if (pending.isEmpty()) item { EmptyState("队列已清空", "需要处理的卡片会显示在这里") }
-        items(pending.take(20), key = { it.id }) { card ->
+        items(pending, key = { it.id }) { card ->
             Card(
                 onClick = { vm.openCard(card.id) },
                 modifier = Modifier.fillMaxWidth(),
@@ -81,7 +103,7 @@ fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingVal
             ) {
                 androidx.compose.foundation.layout.Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(card.content, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-                    StatusPill("${card.sync.aiLabel()} · ${card.sync?.uploadState?.name ?: "LOCAL_ONLY"}")
+                    StatusPill("${card.sync.aiLabel()} · ${card.sync.syncLabel()}")
                 }
             }
         }

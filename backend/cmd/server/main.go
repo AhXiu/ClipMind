@@ -4,6 +4,7 @@ import (
 	"clipmind/backend/internal/books"
 	"clipmind/backend/internal/config"
 	"clipmind/backend/internal/httpapi"
+	"clipmind/backend/internal/knowledge"
 	"clipmind/backend/internal/llm"
 	"clipmind/backend/internal/metrics"
 	"clipmind/backend/internal/pipeline"
@@ -64,6 +65,9 @@ func main() {
 	defer cancel()
 	go worker.Run(ctx)
 	api := &httpapi.Server{Capture: capture, Cards: cards, Metrics: m, AuthDisabled: cfg.AuthDisabled, Token: cfg.AuthToken, Log: log.Default()}
+	if completer, ok := provider.(knowledge.Completer); ok {
+		api.Knowledge = &knowledge.Service{Provider: completer}
+	}
 	srv := &http.Server{Addr: cfg.Addr, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

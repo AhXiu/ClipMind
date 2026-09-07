@@ -10,6 +10,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.clipmind.android.export.ExportFormat
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,8 +24,15 @@ fun ClipMindAppRoot(
     onCopy: (String) -> Unit,
     onExport: (ExportFormat) -> Unit,
 ) {
-    var tab by remember { mutableStateOf(AppTab.CAPTURE) }
+    var tab by rememberSaveable { mutableStateOf(AppTab.CAPTURE) }
+    var confirmLeave by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
     val detail = state.selectedCard
+    val close: () -> Unit = { if (state.editDraft != null) confirmLeave = true else vm.closeCard() }
+    BackHandler(enabled = detail != null, onBack = close)
+    LaunchedEffect(state.message) {
+        state.message?.let { snackbar.showSnackbar(it); vm.clearMessage(it) }
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -43,7 +52,7 @@ fun ClipMindAppRoot(
                     }
                 },
                 navigationIcon = {
-                    if (detail != null) TextButton(vm::closeCard) { Text("返回") }
+                    if (detail != null) TextButton(close) { Text("返回") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
@@ -66,7 +75,7 @@ fun ClipMindAppRoot(
                 }
             }
         },
-        snackbarHost = { state.message?.let { Snackbar(Modifier.padding(12.dp)) { Text(it) } } },
+        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         if (detail != null) CardDetailScreen(state, vm, padding, onCopy)
         else when (tab) {
@@ -76,4 +85,19 @@ fun ClipMindAppRoot(
             AppTab.SETTINGS -> SettingsScreen(state, vm, padding, onOpenShizuku)
         }
     }
+    if (confirmLeave) AlertDialog(
+        onDismissRequest = { confirmLeave = false },
+        title = { Text("放弃未保存的修改？") },
+        text = { Text("返回将丢弃当前编辑草稿，已保存的原文不会改变。") },
+        confirmButton = { TextButton({ confirmLeave = false; vm.closeCard() }) { Text("放弃修改") } },
+        dismissButton = { TextButton({ confirmLeave = false }) { Text("继续编辑") } },
+    )
+    KnowledgeDialogs(state, vm, onCopy)
+    if (state.pendingDeletion.isNotEmpty()) AlertDialog(
+        onDismissRequest = vm::cancelDeletion,
+        title = { Text("删除 ${state.pendingDeletion.size} 张本地卡片？") },
+        text = { Text("卡片将从本机列表移除。此操作不会撤回正在发送的内容，也不会删除云端、Obsidian 或主题笔记中的历史副本；主题笔记需单独删除。") },
+        confirmButton = { TextButton({ vm.confirmDeletion() }) { Text("删除本地卡片") } },
+        dismissButton = { TextButton(vm::cancelDeletion) { Text("取消") } },
+    )
 }

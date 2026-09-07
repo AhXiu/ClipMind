@@ -8,7 +8,24 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-internal const val CLIPMIND_DATABASE_VERSION = 4
+internal const val CLIPMIND_DATABASE_VERSION = 6
+internal val MIGRATION_5_6_STATEMENTS = listOf(
+    "ALTER TABLE card_relations ADD COLUMN encryptedEvidence TEXT",
+    "ALTER TABLE card_relations ADD COLUMN sourceRevision INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE card_relations ADD COLUMN targetRevision INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE card_relations ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'",
+    "CREATE TABLE IF NOT EXISTS knowledge_notes (id TEXT NOT NULL PRIMARY KEY, encryptedPayload TEXT NOT NULL, createdAt INTEGER NOT NULL)",
+)
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) { MIGRATION_5_6_STATEMENTS.forEach(db::execSQL) }
+}
+internal val MIGRATION_4_5_STATEMENTS = listOf(
+    "ALTER TABLE local_cards ADD COLUMN contentRevision INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE sync_metadata ADD COLUMN encryptedServerAnalysis TEXT",
+)
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) { MIGRATION_4_5_STATEMENTS.forEach(db::execSQL) }
+}
 internal const val MIGRATION_1_2_ADD_SERVER_CARD_ID = "ALTER TABLE capture_outbox ADD COLUMN serverCardId TEXT"
 internal const val MIGRATION_1_2_ADD_SERVER_CARD_STATUS = "ALTER TABLE capture_outbox ADD COLUMN serverCardStatus TEXT"
 internal const val MIGRATION_1_2_ADD_SERVER_LAST_ERROR = "ALTER TABLE capture_outbox ADD COLUMN serverLastError TEXT"
@@ -60,7 +77,7 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 }
 
 @Database(
-    entities = [LocalCardEntity::class, SyncMetadataEntity::class, TagEntity::class, CardTagRefEntity::class, CardRelationEntity::class],
+    entities = [LocalCardEntity::class, SyncMetadataEntity::class, TagEntity::class, CardTagRefEntity::class, CardRelationEntity::class, KnowledgeNoteEntity::class],
     version = CLIPMIND_DATABASE_VERSION,
     exportSchema = false,
 )
@@ -72,6 +89,6 @@ abstract class ClipMindDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): ClipMindDatabase = Room.databaseBuilder(
             context.applicationContext, ClipMindDatabase::class.java, "clipmind.db",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
     }
 }

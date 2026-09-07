@@ -8,6 +8,26 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /v1/knowledge:synthesize:
+    post:
+      summary: 归纳用户明确选定的多张卡片并返回带原文证据的关系候选
+      description: 无状态处理，仅使用请求内正文，不按 ID 查询或扩展知识库。固定使用服务端配置的模型，不接受模型地址或 API Key。最多 2 个并发请求，20 秒超时，不自动重试、不发布到 Obsidian。客户端须先确认发送范围。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KnowledgeRequest' }
+      responses:
+        '200':
+          description: 引用已匹配原文，结论仍需人工核对
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeResponse' }
+        '400': { description: 输入范围、敏感内容或格式校验失败 }
+        '401': { description: 未认证 }
+        '429': { description: 并发已满 }
+        '502': { description: 模型调用、JSON 或引用校验失败 }
+        '503': { description: 归纳能力未配置 }
   /health:
     get:
       security: []
@@ -65,6 +85,31 @@ paths:
       responses:
         '200': { description: 已确认并触发发布同步 }
         '409': { description: 当前状态不允许确认 }
+  /v1/cards/{cardId}/analyses:
+    post:
+      summary: 在原卡片上创建新的分析任务并保留历史版本
+      description: 仅允许 awaiting_confirm、synced、ai_failed 状态。新 client_capture_id 标识新任务，重试必须保持 ID 和正文不变。重新生成强制 confirm 模式，不自动覆盖 Obsidian。
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClipEvent' }
+      responses:
+        '200':
+          description: 新任务已接收或逐项验证拒绝；同一幂等键返回原响应
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaptureBatchResponse' }
+        '400': { description: 请求格式或幂等键错误 }
+        '401': { description: 未认证 }
+        '404': { description: 原卡片不存在 }
+        '409': { description: 原卡片仍在处理或同步中，或任务 ID 属于其他卡片 }
   /v1/cards/{cardId}/rollback:
     post:
       parameters:
@@ -99,6 +144,76 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    KnowledgeRequest:
+      type: object
+      additionalProperties: false
+      required: [cards]
+      properties:
+        cards:
+          type: array
+          minItems: 2
+          maxItems: 8
+          description: ID 唯一，总正文不超过 16000 个 Unicode 字符，完整请求不超过 128 KiB。
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, revision, text]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 40, description: 客户端引用标识，不用于服务端查询 }
+              revision: { type: integer, format: int64, minimum: 1 }
+              text: { type: string, minLength: 1, maxLength: 6000 }
+    KnowledgeEvidence:
+      type: object
+      additionalProperties: false
+      required: [card_id, quote]
+      properties:
+        card_id: { type: string, description: 必须来自本次请求 }
+        quote: { type: string, minLength: 1, maxLength: 400, description: 必须是对应卡片的连续原文 }
+    KnowledgeRelation:
+      type: object
+      additionalProperties: false
+      required: [source_id, target_id, type, reason, source_quote, target_quote]
+      properties:
+        source_id: { type: string }
+        target_id: { type: string, description: 不得等于 source_id }
+        type: { type: string, enum: [same_topic, supports, contradicts, extends, example] }
+        reason: { type: string, minLength: 1, maxLength: 600 }
+        source_quote: { type: string, minLength: 1, maxLength: 400 }
+        target_quote: { type: string, minLength: 1, maxLength: 400 }
+    KnowledgeResponse:
+      type: object
+      required: [result, provider, model, prompt_version]
+      properties:
+        provider: { type: string, enum: [ark, openrouter, openai, deterministic] }
+        model: { type: string }
+        prompt_version: { type: string, enum: [knowledge-v1] }
+        result:
+          type: object
+          additionalProperties: false
+          required: [title, points, relations]
+          properties:
+            title: { type: string, minLength: 1, maxLength: 80 }
+            points:
+              type: array
+              minItems: 1
+              maxItems: 16
+              description: 所有已选卡片至少被引用一次；共同观点和分歧必须引用至少两张不同卡片。
+              items:
+                type: object
+                additionalProperties: false
+                required: [kind, text, evidence]
+                properties:
+                  kind: { type: string, enum: [summary, agreement, difference, question] }
+                  text: { type: string, minLength: 1, maxLength: 1200 }
+                  evidence:
+                    type: array
+                    minItems: 1
+                    maxItems: 8
+                    items: { $ref: '#/components/schemas/KnowledgeEvidence' }
+            relations:
+              type: array
+              maxItems: 12
+              items: { $ref: '#/components/schemas/KnowledgeRelation' }
     CaptureBatchRequest:
       type: object
       required: [captures]

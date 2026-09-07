@@ -45,3 +45,12 @@ data class ServerCard(
     @SerializedName("active_version_id") val activeVersionId: String? = null,
     @SerializedName("last_error") val lastError: String? = null,
 )
+
+data class ServerCardVersion(
+    @SerializedName("id") val id: String,
+    @SerializedName("card_id") val cardId: String,
+    @SerializedName("primary_tag") val primaryTag: String,
+    @SerializedName("interpretation") val interpretation: AnalysisInterpretation,
+    @SerializedName("llm_provider") val provider: String,
+    @SerializedName("llm_model") val model: String,
+)

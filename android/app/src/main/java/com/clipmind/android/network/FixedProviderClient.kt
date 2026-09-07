@@ -20,6 +20,7 @@ enum class ByokErrorCode {
     BYOK_KEY_MISSING,
     BYOK_MODEL_MISSING,
     BYOK_HTTP,
+    BYOK_AUTH,
     BYOK_NETWORK,
     BYOK_JSON,
     BYOK_VALIDATION,
@@ -72,7 +73,9 @@ class FixedProviderClient(
             .build()
         try {
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext ByokAnalysisResult.Failure(ByokErrorCode.BYOK_HTTP)
+                if (!response.isSuccessful) return@withContext ByokAnalysisResult.Failure(
+                    if (response.code in setOf(401, 403)) ByokErrorCode.BYOK_AUTH else ByokErrorCode.BYOK_HTTP,
+                )
                 val responseBody = response.body
                     ?: return@withContext ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
                 if (responseBody.contentLength() > MAX_RESPONSE_BYTES) {

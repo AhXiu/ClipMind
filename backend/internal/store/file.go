@@ -13,6 +13,7 @@ import (
 )
 
 var ErrNotFound = errors.New("not found")
+var ErrStaleWork = errors.New("card has a newer analysis task")
 
 type state struct {
 	Captures  map[string]domain.Capture     `json:"captures"`
@@ -150,6 +151,9 @@ func (t *fileTx) UpdateCapture(c domain.Capture) error {
 	if _, ok := t.s.Captures[c.ID]; !ok {
 		return ErrNotFound
 	}
+	if card, ok := t.s.Cards[c.CardID]; ok && card.CaptureID != c.ID {
+		return ErrStaleWork
+	}
 	t.s.Captures[c.ID] = c
 	return nil
 }
@@ -164,7 +168,28 @@ func (t *fileTx) UpdateCard(c domain.Card) error {
 	if _, ok := t.s.Cards[c.ID]; !ok {
 		return ErrNotFound
 	}
+	if t.s.Cards[c.ID].CaptureID != c.CaptureID {
+		return ErrStaleWork
+	}
 	t.s.Cards[c.ID] = c
+	return nil
+}
+
+// Reanalysis keeps the card and its immutable versions, but replaces its task.
+func (t *fileTx) ReplaceCardCapture(cardID string, capture domain.Capture) error {
+	card, ok := t.s.Cards[cardID]
+	if !ok {
+		return ErrNotFound
+	}
+	if card.Status != domain.StatusAwaitingConfirm && card.Status != domain.StatusSynced && card.Status != domain.StatusAIFailed {
+		return errors.New("card has unfinished processing or synchronization")
+	}
+	card.CaptureID = capture.ID
+	card.Status = domain.StatusPersisted
+	card.ActiveVersionID = ""
+	card.LastError = ""
+	card.UpdatedAt = capture.CreatedAt
+	t.s.Cards[cardID] = card
 	return nil
 }
 func (t *fileTx) AddVersion(v domain.CardVersion) (domain.CardVersion, error) {
@@ -212,6 +237,9 @@ func (r *FileRepository) ListPipelineReady(limit int) ([]domain.Capture, error) 
 	defer r.mu.RUnlock()
 	a := []domain.Capture{}
 	for _, v := range r.s.Captures {
+		if card, ok := r.s.Cards[v.CardID]; !ok || card.CaptureID != v.ID {
+			continue
+		}
 		if v.Status == domain.StatusPersisted || v.Status == domain.StatusAIFailed || v.Status == domain.StatusAISucceeded || (v.Status == domain.StatusPublished && strings.EqualFold(v.Mode, "auto")) {
 			v.StatusHistory = append([]domain.StatusEvent(nil), v.StatusHistory...)
 			a = append(a, v)
@@ -314,12 +342,7 @@ func (r *FileRepository) CreateCard(c domain.Card) error {
 }
 func (r *FileRepository) UpdateCard(c domain.Card) error {
 	return r.Transaction(func(tx Transaction) error {
-		t := tx.(*fileTx)
-		if _, ok := t.s.Cards[c.ID]; !ok {
-			return ErrNotFound
-		}
-		t.s.Cards[c.ID] = c
-		return nil
+		return tx.UpdateCard(c)
 	})
 }
 func (r *FileRepository) GetCard(id string) (domain.Card, error) {
