@@ -11,7 +11,11 @@ import com.clipmind.android.data.*
 
 @Composable
 fun SettingsScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues, onOpenShizuku: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
         item { SettingsSection("剪贴采集") { CaptureConfiguration(state, vm, onOpenShizuku) } }
         item { SettingsSection("AI 服务") { AiConfiguration(state, vm) } }
         item { SettingsSection("同步备份") { SyncConfiguration(state, vm) } }
@@ -25,12 +29,17 @@ fun SettingsScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues
 }
 
 @Composable private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) =
-    Card { Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); content() } }
+    FlatCard(Modifier.fillMaxWidth()) {
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        content()
+    }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable private fun CaptureConfiguration(state: MainUiState, vm: MainViewModel, onOpenShizuku: () -> Unit) {
     var minimum by remember(state.minimumCaptureLength) { mutableStateOf(state.minimumCaptureLength.toString()) }
     Text("Shizuku：${state.shizukuState.name}")
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onOpenShizuku) { Text("打开 Shizuku") }; OutlinedButton(vm::testClipboardRead) { Text("只读测试") } }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onOpenShizuku) { Text("打开 Shizuku") }; OutlinedButton(vm::testClipboardRead) { Text("只读测试") } }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(state.mode == CaptureMode.AUTO, { vm.setMode(CaptureMode.AUTO) }, { Text("自动") })
         FilterChip(state.mode == CaptureMode.CONFIRM, { vm.setMode(CaptureMode.CONFIRM) }, { Text("确认") })
@@ -54,7 +63,7 @@ fun SettingsScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues
 }
 
 @Composable private fun SettingSwitch(label: String, checked: Boolean, change: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label); Switch(checked, change) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(label); Switch(checked, change) }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -70,7 +79,7 @@ fun SettingsScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues
         Button({ if (state.aiMode == AiMode.BYOK_ARK) vm.setArkModel(model) else vm.setOpenRouterModel(model) }, enabled = model.isNotBlank()) { Text("保存模型") }
         Text("API Key：${if (state.apiKeyConfigured) "已安全保存" else "未配置"}")
         OutlinedTextField(key, { key = it }, Modifier.fillMaxWidth(), label = { Text("API Key") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button({ if (vm.saveApiKey(key)) key = "" }, enabled = key.isNotBlank()) { Text("保存 Key") }
             OutlinedButton({ vm.clearApiKey(); key = "" }, enabled = state.apiKeyConfigured) { Text("清除") }
             OutlinedButton(vm::testModelConnection) { Text("测试") }
@@ -79,12 +88,13 @@ fun SettingsScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable private fun SyncConfiguration(state: MainUiState, vm: MainViewModel) {
     var token by remember { mutableStateOf("") }
     Text("后端：${state.apiBaseUrl}", style = MaterialTheme.typography.bodySmall)
     Text("Token：${if (state.tokenConfigured) "已安全保存" else "未配置"}")
     OutlinedTextField(token, { token = it }, Modifier.fillMaxWidth(), label = { Text("上传 Token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button({ if (vm.saveToken(token)) token = "" }, enabled = token.isNotBlank()) { Text("保存") }
         OutlinedButton({ vm.clearToken(); token = "" }, enabled = state.tokenConfigured) { Text("清除") }
         OutlinedButton(vm::testConnection) { Text("测试连接") }

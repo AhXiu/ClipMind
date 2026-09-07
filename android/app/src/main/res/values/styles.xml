@@ -3,6 +3,7 @@
     <style name="Theme.ClipMind" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#F7F7FC</item>
+        <item name="android:statusBarColor">#F7F8F4</item>
+        <item name="android:navigationBarColor">#FCFDF9</item>
     </style>
 </resources>

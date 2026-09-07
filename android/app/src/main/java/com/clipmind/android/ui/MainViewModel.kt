@@ -19,7 +19,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-enum class AppTab(val title: String) { CAPTURE("采集卡片"), LIBRARY("本地卡片库"), AI("AI工作台"), SETTINGS("设置") }
+enum class AppTab(val title: String, val label: String, val subtitle: String) {
+    CAPTURE("采集", "采集", "随手记录，沉淀想法"),
+    LIBRARY("卡片库", "卡片", "搜索与整理本地内容"),
+    AI("AI 工作台", "AI", "处理、发现与导出"),
+    SETTINGS("设置", "设置", "偏好与服务配置"),
+}
 enum class CardTimeFilter { ALL, TODAY, WEEK }
 enum class CardAiFilter { ALL, PENDING, COMPLETE, FAILED }
 

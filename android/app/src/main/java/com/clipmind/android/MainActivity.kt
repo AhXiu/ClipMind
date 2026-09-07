@@ -9,13 +9,14 @@ import android.os.Build
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.clipmind.android.ui.ClipMindAppRoot
+import com.clipmind.android.ui.ClipMindTheme
 import com.clipmind.android.ui.MainViewModel
 import com.clipmind.android.export.ExportFormat
 import java.time.LocalDate
@@ -32,10 +33,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         acceptSharedText(intent)
         setContent {
             val state by viewModel.uiState.collectAsState()
-            MaterialTheme {
+            ClipMindTheme {
                 ClipMindAppRoot(
                     state = state,
                     vm = viewModel,
