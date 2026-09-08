@@ -6,7 +6,7 @@ import org.junit.Test
 
 class DatabaseMigrationContractTest {
     @Test fun databaseVersionAndMigrationChainAreExplicit() {
-        assertEquals(6, CLIPMIND_DATABASE_VERSION)
+        assertEquals(7, CLIPMIND_DATABASE_VERSION)
         assertEquals(1, MIGRATION_1_2.startVersion)
         assertEquals(2, MIGRATION_1_2.endVersion)
         assertEquals(2, MIGRATION_2_3.startVersion)
@@ -17,6 +17,9 @@ class DatabaseMigrationContractTest {
         assertEquals(5, MIGRATION_4_5.endVersion)
         assertEquals(5, MIGRATION_5_6.startVersion)
         assertEquals(6, MIGRATION_5_6.endVersion)
+        assertEquals(6, MIGRATION_6_7.startVersion)
+        assertEquals(7, MIGRATION_6_7.endVersion)
+        assertTrue(MIGRATION_6_7_STATEMENTS.none { it.contains("DROP TABLE") })
     }
 
     @Test fun v5AddsRevisionAndEncryptedResultWithoutDroppingData() {

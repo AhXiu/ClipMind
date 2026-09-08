@@ -29,11 +29,11 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
                 Text("AI 解读", style = MaterialTheme.typography.titleLarge)
                 StatusPill(card.sync.aiLabel(), positive = card.sync.analysisState() == CardAnalysisState.COMPLETE)
                 card.analysis?.let { analysis ->
-                    Text("总结", style = MaterialTheme.typography.titleMedium)
+                    Text(if (analysis.schemaVersion >= 2) "核心释义" else "总结（旧版）", style = MaterialTheme.typography.titleMedium)
                     Text(analysis.interpretation.summary)
-                    Text("解读 · 模型推论", style = MaterialTheme.typography.titleMedium)
+                    Text(if (analysis.schemaVersion >= 2) "场景应用 · 模型推论" else "解读 · 模型推论", style = MaterialTheme.typography.titleMedium)
                     Text(analysis.interpretation.insight)
-                    Text("行动建议", style = MaterialTheme.typography.titleMedium)
+                    Text(if (analysis.schemaVersion >= 2) "认知启发" else "行动建议（旧版）", style = MaterialTheme.typography.titleMedium)
                     Text(analysis.interpretation.action)
                     Text("${analysis.provider} / ${analysis.model} · 内容版本 ${card.contentRevision}", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton({ onCopy(analysis.interpretation.summary) }) { Text("复制总结") }
@@ -42,6 +42,11 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
                     else "提交后将在这里展示总结、解读和行动建议。",
                 )
                 Text(card.sync.syncLabel(), style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button({ vm.learning.prepareAnalysis(card.id) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("完整解读与思考题") }
+                    OutlinedButton({ vm.learning.prepareAnalysis(card.id,true) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("解读并检索真实文章") }
+                }
+                Text("完整分析保存在本机；自动写入 Obsidian 的云端卡片独立管理，请使用本地导出获取完整内容。", style = MaterialTheme.typography.bodySmall)
                 card.sync?.lastErrorCode?.let { Text("处理错误：$it", color = MaterialTheme.colorScheme.error) }
                 when (val operation = state.cardOperations[card.id]) {
                     is CardOperationUiState.Failed -> Text("操作失败：${operation.errorCode}", color = MaterialTheme.colorScheme.error)
@@ -83,7 +88,11 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
         item {
             FlatCard(Modifier.fillMaxWidth()) {
                 Text("标签", style = MaterialTheme.typography.titleMedium)
-                Text("已确认：${card.tags.joinToString { it.name }.ifEmpty { "暂无" }}")
+                Text("一级：${card.analysis?.primaryTag ?: card.tags.firstOrNull { it.level == 1 }?.name ?: "待分类"}")
+                Text("二级已确认：${card.tags.filter { it.level == 2 && it.status == "confirmed" }.joinToString { it.name }.ifEmpty { "暂无" }}")
+                card.tags.filter { it.status == "pending" }.forEach { tag ->
+                    Row { Text("${tag.name} · 新增待确认", Modifier.weight(1f)); TextButton({ vm.learning.tag(tag.id,"confirm") }) { Text("确认") }; TextButton({ vm.removeTag(card.id,tag.id) }) { Text("移除此卡标签") } }
+                }
                 card.analysis?.primaryTag?.takeIf { candidate -> card.tags.none { it.name == candidate } }?.let { candidate ->
                     Text("AI 候选：$candidate", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton({ vm.addTag(setOf(card.id), candidate) }) { Text("采用标签") }
@@ -94,6 +103,10 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
         item {
             FlatCard(Modifier.fillMaxWidth()) {
                 Text("发现关联", style = MaterialTheme.typography.titleMedium)
+                Button({ vm.learning.prepareSemantic(card.id) }, enabled = !editing && state.aiEnabled && !state.learning.busy) { Text("语义 Top-5 + LLM 关联判断") }
+                Text("真实向量在本机检索；首次需授权建立全库加密索引。观点是否一致由 LLM 再判断，不由相似度分数决定。", style = MaterialTheme.typography.bodySmall)
+                if (state.learning.busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(state.learning.progress); TextButton(vm.learning::cancel) { Text("取消等待") } }
+                if(state.learning.matchSourceKey == "${card.id}:${card.contentRevision}") state.learning.matches.forEach { match -> Text("召回卡片 ${match.card.id} · 相似度 ${"%.3f".format(match.score)}\n${match.card.text.take(100)}", style = MaterialTheme.typography.bodySmall) }
                 Text("在最近 300 张本地卡片中按词语重合检索，最多推荐 5 张；不会外发正文。词语相似不代表观点一致。", style = MaterialTheme.typography.bodySmall)
                 OutlinedButton({ vm.knowledge.discover(card.id) }, enabled = !editing && card.contentAvailable && !state.knowledge.discovering) {
                     Text(if (state.knowledge.discovering) "检索中" else "查找本地关联")
@@ -106,8 +119,11 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
             FlatCard(Modifier.fillMaxWidth()) {
                 val otherId = if (relation.sourceCardId == card.id) relation.targetCardId else relation.sourceCardId
                 Text("${relationLabel(relation.relationType)} · ${if (relation.origin == "local_overlap") "本机词语匹配" else if (relation.origin == "llm") "模型建议" else "手动关联"}")
+                Text(when (relation.relationType) { "supports" -> "相似观点"; "contradicts", "extends", "example" -> "对立／互补视角"; else -> "仅同主题，尚不能判断观点关系" }, style = MaterialTheme.typography.titleMedium)
                 Text("方向：卡片 ${relation.sourceCardId} → 卡片 ${relation.targetCardId}", style = MaterialTheme.typography.bodySmall)
                 state.relationEvidence[relation.id]?.let { evidence ->
+                    val summary = if(relation.sourceCardId == card.id) evidence.targetSummary else evidence.sourceSummary
+                    summary?.let { Text("关联卡片摘要：$it") }
                     Text(evidence.reason)
                     Text("来源证据：“${evidence.sourceQuote}”", style = MaterialTheme.typography.bodySmall)
                     Text("目标证据：“${evidence.targetQuote}”", style = MaterialTheme.typography.bodySmall)
@@ -126,6 +142,7 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
         items(confirmed, key = { "confirmed-${it.id}" }) { relation ->
             Text("${relationLabel(relation.relationType)}：卡片 ${relation.sourceCardId} → 卡片 ${relation.targetCardId}")
         }
+        item { ReadingResults(card,state,vm) }
         item { Spacer(Modifier.height(20.dp)) }
     }
     if (addTag) TextEntryDialog("添加标签", { addTag = false }, { vm.addTag(setOf(card.id), it); addTag = false })

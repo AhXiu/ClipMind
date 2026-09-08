@@ -21,7 +21,7 @@ data class KnowledgeResponse(
 )
 data class KnowledgeNotePayload(val input: KnowledgeRequest, val response: KnowledgeResponse)
 data class KnowledgeNote(val id: String, val createdAt: Long, val payload: KnowledgeNotePayload?, val stale: Boolean)
-data class RelationEvidence(val reason: String, val sourceQuote: String, val targetQuote: String)
+data class RelationEvidence(val reason: String, val sourceQuote: String, val targetQuote: String, val sourceSummary: String? = null, val targetSummary: String? = null)
 
 object KnowledgeContract {
     const val PROMPT_VERSION = "knowledge-v1"

@@ -177,6 +177,11 @@ fun TabGlyph(tab: AppTab, selected: Boolean, modifier: Modifier = Modifier) {
                 drawLine(color, Offset(size.width * .10f, size.height * .50f), Offset(size.width * .23f, size.height * .50f), stroke.width, StrokeCap.Round)
                 drawLine(color, Offset(size.width * .77f, size.height * .50f), Offset(size.width * .90f, size.height * .50f), stroke.width, StrokeCap.Round)
             }
+            AppTab.REVIEW -> {
+                drawArc(color, 30f, 300f, false, style = stroke)
+                drawLine(color, center, Offset(size.width * .5f, size.height * .25f), stroke.width, StrokeCap.Round)
+                drawLine(color, center, Offset(size.width * .7f, size.height * .6f), stroke.width, StrokeCap.Round)
+            }
             AppTab.SETTINGS -> {
                 drawCircle(color = color, radius = size.width * .31f, center = center, style = stroke)
                 drawCircle(color = color, radius = size.width * .09f, center = center)

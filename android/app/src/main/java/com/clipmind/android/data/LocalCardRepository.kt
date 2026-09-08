@@ -30,6 +30,7 @@ data class LocalCard(
     val sync: SyncMetadataEntity? = null,
     val analysis: ClientAnalysis? = null,
     val contentRevision: Long = 1,
+    val bookSources: List<com.clipmind.android.reading.BookAttribution> = emptyList(),
 )
 
 class LocalCardRepository(
@@ -49,14 +50,14 @@ class LocalCardRepository(
     }
 
     suspend fun edit(id: Long, content: String, now: Long = System.currentTimeMillis(), minimumLength: Int = 8): Boolean {
-        val normalized = CaptureHash.normalize(content)
+        val normalized = content
         require(safetyFilter.evaluate(normalized, null, minimumLength) == FilterResult.Allowed) { "内容为空、过短或包含敏感信息" }
         val encrypted = withContext(Dispatchers.Default) { cipher.encrypt(normalized) }
         return db.withTransaction {
             val card = dao.card(id) ?: return@withTransaction false
             val sync = dao.syncMetadata(id) ?: return@withTransaction false
             if (!canEditCard(sync.uploadState)) return@withTransaction false
-            if (card.card.hash == CaptureHash.sha256(normalized)) return@withTransaction true
+            if (cipher.decrypt(card.card.encryptedContent) == content) return@withTransaction true
             if (dao.edit(id, encrypted, CaptureHash.sha256(normalized), now) != 1) return@withTransaction false
             dao.setTaskId(id, UUID.randomUUID().toString())
             dao.resetAnalysis(id, OutboxState.LOCAL_ONLY, sync.aiProvider, sync.aiModel, now)
@@ -103,7 +104,8 @@ class LocalCardRepository(
         if (displayName.isEmpty()) return false
         val normalized = displayName.lowercase(Locale.ROOT)
         return db.withTransaction {
-            val inserted = dao.insertTag(TagEntity(name = displayName, normalizedName = normalized, createdAt = now))
+            require(displayName.length <= 30) { "标签最多30字" }
+            val inserted = dao.insertTag(TagEntity(name = displayName, normalizedName = normalized, createdAt = now, level = if (displayName in com.clipmind.android.reading.ReadingContract.PRIMARY) 1 else 2))
             val tagId = inserted.takeIf { it != -1L } ?: dao.tagId(normalized) ?: return@withTransaction false
             dao.insertCardTag(CardTagRefEntity(cardId, tagId)) != -1L
         }
@@ -129,15 +131,21 @@ class LocalCardRepository(
     suspend fun relations(cardId: Long): List<CardRelationEntity> = dao.relations(cardId)
 
     suspend fun exportSnapshot(): ExportSnapshot = withContext(Dispatchers.Default) {
-        val cards = dao.exportCards().map { value ->
-            val text = cipher.decrypt(value.card.encryptedContent)
-            LocalCard(
-                value.card.id, text, true, value.card.capturedAt, value.card.updatedAt,
-                value.card.sourceApp, value.tags, value.card.sourceUrl, value.card.mode,
-                dao.syncMetadata(value.card.id),
-            )
+        db.withTransaction {
+            val sources = db.readingDao().documents("book_source").map { Gson().fromJson(cipher.decrypt(it.encryptedPayload),com.clipmind.android.reading.BookAttribution::class.java) }
+            val cards = dao.exportCards().map { value -> decrypt(value, value.sync).also { require(it.contentAvailable) { "卡片无法解密，导出已中止" } }.copy(bookSources=sources.filter { it.cardId == value.card.id && it.revision == value.card.contentRevision }) }
+            val relations = dao.confirmedRelations()
+            val evidence = relations.mapNotNull { r -> runCatching { r.encryptedEvidence?.let { r.id to Gson().fromJson(cipher.decrypt(it), com.clipmind.android.knowledge.RelationEvidence::class.java) } }.getOrNull() }.toMap()
+            val documents = listOf("weekly", "annotation", "raw_capture").flatMap { kind ->
+                db.readingDao().documents(kind).mapNotNull { row ->
+                    val plain = cipher.decrypt(row.encryptedPayload)
+                    if (kind == "raw_capture" && com.google.gson.JsonParser.parseString(plain).asJsonObject.get("card_id")?.asLong !in cards.map { it.id }) return@mapNotNull null
+                    val name = row.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                    com.clipmind.android.export.MarkdownFile("${if(kind == "raw_capture") "raw" else "reflections"}/$name.${if(kind == "weekly") "md" else "json"}",plain)
+                }
+            }
+            ExportSnapshot(cards, relations, documents, evidence)
         }
-        ExportSnapshot(cards, dao.confirmedRelations())
     }
 
     suspend fun pendingAiTasks(): List<LocalCard> = withContext(Dispatchers.Default) {
@@ -154,7 +162,7 @@ class LocalCardRepository(
             capturedAt = value.card.capturedAt, updatedAt = value.card.updatedAt,
             sourceApp = value.card.sourceApp, tags = value.tags, sourceUrl = value.card.sourceUrl,
             mode = value.card.mode, sync = sync,
-            analysis = decryptAnalysis(sync, cipher), contentRevision = value.card.contentRevision,
+            analysis = value.reading?.takeIf { it.revision == value.card.contentRevision }?.let { row -> runCatching { Gson().fromJson(cipher.decrypt(row.encryptedPayload), ClientAnalysis::class.java).takeIf(com.clipmind.android.reading.ReadingContract::valid) }.getOrNull() } ?: decryptAnalysis(sync, cipher), contentRevision = value.card.contentRevision,
         )
     }
 }

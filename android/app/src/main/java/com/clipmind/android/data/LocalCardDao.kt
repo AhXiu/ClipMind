@@ -10,6 +10,12 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface LocalCardDao {
+    @Query("SELECT * FROM tags ORDER BY level, status, normalizedName") fun observeTags(): Flow<List<TagEntity>>
+    @Query("SELECT * FROM tags ORDER BY normalizedName") suspend fun allTags(): List<TagEntity>
+    @Query("SELECT * FROM tags WHERE id = :id") suspend fun tag(id: Long): TagEntity?
+    @Update suspend fun updateTag(tag: TagEntity)
+    @Query("DELETE FROM tags WHERE id = :id AND level = 2") suspend fun deleteTag(id: Long)
+    @Query("INSERT OR IGNORE INTO card_tag_refs(cardId, tagId) SELECT cardId, :target FROM card_tag_refs WHERE tagId = :source") suspend fun copyTagRefs(source: Long, target: Long)
     @Transaction
     @Query("SELECT * FROM local_cards WHERE deletedAt IS NULL ORDER BY capturedAt DESC LIMIT 300")
     suspend fun retrievalCards(): List<LocalCardWithTags>

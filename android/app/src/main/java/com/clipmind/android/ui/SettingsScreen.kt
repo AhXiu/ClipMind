@@ -17,6 +17,7 @@ fun SettingsScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        item { LearningSettingsView(state,vm) }
         item { SettingsSection("剪贴采集") { CaptureConfiguration(state, vm, onOpenShizuku) } }
         item { SettingsSection("AI 服务") { AiConfiguration(state, vm) } }
         item { SettingsSection("同步备份") { SyncConfiguration(state, vm) } }

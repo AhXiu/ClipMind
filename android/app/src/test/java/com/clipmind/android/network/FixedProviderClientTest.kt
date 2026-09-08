@@ -22,7 +22,7 @@ class FixedProviderClientTest {
         val result = client.parseResponse(envelope, "ark", "model-1")
         assertTrue(result is ByokAnalysisResult.Success)
         val analysis = (result as ByokAnalysisResult.Success).analysis
-        assertEquals(ClientAnalysis("ark", "model-1", "技术", analysis.interpretation, analysis.books), analysis)
+        assertEquals(ClientAnalysis("ark", "model-1", "技术", analysis.interpretation, analysis.books, schemaVersion = 2), analysis)
     }
 
     @Test fun malformedAndInvalidResponsesUseFixedCategories() {

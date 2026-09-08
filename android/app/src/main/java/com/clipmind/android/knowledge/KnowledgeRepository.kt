@@ -52,8 +52,9 @@ class KnowledgeRepository(private val db: ClipMindDatabase, private val cipher: 
             dao.insertKnowledgeNote(KnowledgeNoteEntity(id, payload, System.currentTimeMillis()))
             val cards = input.cards.associateBy { it.id }
             response.result.relations.forEach { r ->
+                fun summary(id: String) = response.result.points.firstOrNull { it.kind == "summary" && it.evidence.any { e -> e.cardId == id } }?.text
                 saveCandidate(cards.getValue(r.sourceId), cards.getValue(r.targetId), r.type,
-                    RelationEvidence(r.reason, r.sourceQuote, r.targetQuote), "llm")
+                    RelationEvidence(r.reason, r.sourceQuote, r.targetQuote, summary(r.sourceId), summary(r.targetId)), "llm")
             }
         }
         id
@@ -88,7 +89,7 @@ class KnowledgeRepository(private val db: ClipMindDatabase, private val cipher: 
     private suspend fun saveCandidate(a: KnowledgeCard, b: KnowledgeCard, type: String, evidence: RelationEvidence, origin: String): Boolean {
         var source = a; var target = b; var proof = evidence
         if (type in setOf("same_topic", "contradicts") && a.id.toLong() > b.id.toLong()) {
-            source = b; target = a; proof = evidence.copy(sourceQuote = evidence.targetQuote, targetQuote = evidence.sourceQuote)
+            source = b; target = a; proof = evidence.copy(sourceQuote = evidence.targetQuote, targetQuote = evidence.sourceQuote, sourceSummary = evidence.targetSummary, targetSummary = evidence.sourceSummary)
         }
         val sourceId = source.id.toLong(); val targetId = target.id.toLong()
         if (dao.card(sourceId)?.card?.contentRevision != source.revision || dao.card(targetId)?.card?.contentRevision != target.revision) return false

@@ -31,10 +31,14 @@ go run ./cmd/server
 | `OPENROUTER_MODEL` | 空 | OpenRouter 模型 ID，选择 OpenRouter 时必填 |
 | `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE` | 空 | 可选固定归因请求头，不作为运行依赖 |
 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI 兼容默认值 | 旧 `openai` provider 兼容配置 |
+| `CLIPMIND_EMBEDDING_MODEL` | 空 | 与 `OPENAI_API_KEY` 同时配置才启用向量生成；必须与响应的精确模型身份一致，固定调用 OpenAI 官方 embeddings 地址，不使用 `OPENAI_BASE_URL` |
+| `BRAVE_SEARCH_API_KEY` | 空 | 启用真实文章检索；缺失时显式返回未配置提示，不编造链接 |
 
 生产密钥示例：`openssl rand -base64 32`。Ark/OpenRouter/OpenAI key 必须由部署平台 Secret 注入，不得写入文件、日志或响应。OpenRouter base URL 固定为 `https://openrouter.ai/api/v1`，不接受客户端 URL，以阻断 SSRF。服务不会记录 `raw_text`；原文备份为 AES-256-GCM 文件。`RawBackup.Delete` 是明确的删除策略扩展点，不作“不可删除”承诺。详见 [SECURITY.md](SECURITY.md)。
 
 ## API
+
+阅读闭环增加 `GET /v1/reading/capabilities` 及 `POST /v1/reading:analyze`、`/v1/reading:embed`、`/v1/reading:weekly`、`/v1/reading:recommend`。沿用 Bearer 鉴权，无状态处理，不自行读取用户历史或触发发布。与知识归纳共享 2 个并发槽，每次请求最多 128 KiB、25 秒超时、不自动重试。模型/检索依赖及限制见 [完整说明](../docs/reading-loop.md) 和 [OpenAPI](../api/openapi.yaml)。服务端当前为单用户共享 Token 模型，不能当作有租户隔离的多用户托管服务。
 
 - `GET /health`：健康检查（无需鉴权）
 - `GET /metrics`：进程内计数器 JSON（无需鉴权）
@@ -83,7 +87,7 @@ go run ./cmd/server
 
 ## 流水线与状态
 
-Worker 执行：清洗 → 受控一级标签 → AI 三段解读（总结/解读/行动）→ OpenLibrary 书籍验证 → Markdown 渲染。一级标签严格限定为：`人文/商业/技术/认知/职场/社会/随笔`。未被 OpenLibrary 真实响应验证的候选不会渲染为确定书目。
+Worker 执行：保留原文 → 受控一级标签 → AI 三段解读（核心释义/场景应用/认知启发）→ OpenLibrary 书籍验证 → Markdown 渲染。`schema_version=2` 使用新含义；旧版 BYOK 保留旧格式。一级标签严格限定为：`人文/商业/技术/认知/职场/社会/随笔`。未被 OpenLibrary 真实响应验证的候选不会渲染为书目，元数据匹配不能证明摘抄出自该书。
 
 状态机覆盖：`received → filtered_pass/filtered_reject → persisted → ai_running → ai_succeeded/ai_failed → awaiting_confirm → published → syncing → synced`。Worker 启动及每次轮询会恢复超过阈值仍处于 `ai_running` 的任务；失败任务可按次数重试。版本号由 repository 在写锁内按卡片最大版本号分配，每次成功输出新的不可变 `CardVersion`。OpenLibrary 的 `verified`、`not_found` 和 `dependency_error` 通过不包含候选文本的日志及指标区分。
 
@@ -94,4 +98,4 @@ go test ./...
 go vet ./...
 ```
 
-Phase 1 不包含向量库、文章搜索或双向同步。
+原文备份为加密的版本化 JSON，结构化 `store.json` 和输出 Markdown 不是加密数据库，必须保护目录访问权限。新阅读接口结果由 Android 加密保存和导出；既有 Obsidian 自动同步路径不会自动带上仅在本地确认的关系、文章和批注。双向同步不在本轮范围。

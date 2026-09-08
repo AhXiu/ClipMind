@@ -40,7 +40,7 @@ class CaptureContractTest {
 
         assertEquals("client-1", item["client_capture_id"].asString)
         assertEquals("original text", item["raw_text"].asString)
-        assertEquals("abc123", item["text_sha256"].asString)
+        assertEquals(java.security.MessageDigest.getInstance("SHA-256").digest("original text".toByteArray()).joinToString("") { "%02x".format(it) }, item["text_sha256"].asString)
         assertEquals("notes.app", item["source_app"].asString)
         assertEquals("https://source.example/item", item["source_url"].asString)
         assertEquals("auto", item["mode"].asString)
@@ -67,6 +67,7 @@ class CaptureContractTest {
         assertEquals("认知", byokJson.getAsJsonObject("client_analysis")["primary_tag"].asString)
         assertTrue(byokJson.getAsJsonObject("client_analysis").has("interpretation"))
         assertTrue(byokJson.getAsJsonObject("client_analysis").has("books"))
+        assertFalse(byokJson.getAsJsonObject("client_analysis").getAsJsonArray("books")[0].asJsonObject.has("verified"))
         val serverJson = JsonParser.parseString(gson.toJson(prepareUploadBatch(listOf(base), cipher).uploads.single().item)).asJsonObject
         assertFalse(serverJson.has("client_analysis"))
     }

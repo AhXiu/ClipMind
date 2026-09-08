@@ -42,7 +42,7 @@ class MigrationTest(unittest.TestCase):
                 (?, ?, 'encrypted-original', 'hash', NULL, NULL, 'confirm', ?, 100, 200,
                 0, 0, NULL, 'server-card', 'awaiting_confirm', NULL, 'ark', 'model', 'encrypted-analysis')""",
                 (row_id, f"task-{row_id}", state))
-        for statement in migration("MIGRATION_3_4_STATEMENTS") + migration("MIGRATION_4_5_STATEMENTS") + migration("MIGRATION_5_6_STATEMENTS"):
+        for statement in migration("MIGRATION_3_4_STATEMENTS") + migration("MIGRATION_4_5_STATEMENTS") + migration("MIGRATION_5_6_STATEMENTS") + migration("MIGRATION_6_7_STATEMENTS"):
             self.db.execute(statement)
 
     def test_migration_preserves_ciphertext_and_sync_metadata(self):
@@ -90,6 +90,37 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(["id", "encryptedPayload", "createdAt"], columns)
         self.db.execute("INSERT INTO knowledge_notes VALUES ('note','encrypted-test-data',1)")
         self.assertEqual(("encrypted-test-data",), self.db.execute("SELECT encryptedPayload FROM knowledge_notes").fetchone())
+
+    def test_tag_merge_preserves_references_and_delete_protects_primary(self):
+        self.db.execute("INSERT INTO tags VALUES (1,'source','source',1,2,'pending')")
+        self.db.execute("INSERT INTO tags VALUES (2,'target','target',1,2,'confirmed')")
+        self.db.execute("INSERT INTO tags VALUES (3,'技术','技术',1,1,'confirmed')")
+        self.db.execute("INSERT INTO card_tag_refs VALUES (1,1)")
+        self.db.execute("INSERT INTO card_tag_refs VALUES (1,2)")
+        self.db.execute(query("copyTagRefs", "LocalCardDao.kt"), {"source": 1, "target": 2})
+        self.db.execute(query("deleteTag", "LocalCardDao.kt"), {"id": 1})
+        self.db.execute(query("deleteTag", "LocalCardDao.kt"), {"id": 3})
+        self.assertEqual([(1, 2)], self.db.execute("SELECT * FROM card_tag_refs").fetchall())
+        self.assertEqual([(3,)], self.db.execute("SELECT id FROM tags WHERE level = 1").fetchall())
+        self.assertEqual([], self.db.execute("PRAGMA foreign_key_check").fetchall())
+
+    def test_v7_encrypted_payload_and_review_state_survive_queries(self):
+        self.db.execute("INSERT INTO card_vectors VALUES (1,1,'model-v1','encrypted-vector')")
+        self.db.execute("INSERT INTO card_reading VALUES (1,1,'encrypted-analysis',1)")
+        self.db.execute("INSERT INTO reader_documents VALUES ('weekly:2026-09-07','weekly','encrypted-report',1)")
+        self.db.execute("INSERT INTO review_schedule VALUES (1,1,123,6,2,2.5,'2026-09-08')")
+        self.assertEqual((6, 2, 2.5), self.db.execute("SELECT intervalDays,repetitions,ease FROM review_schedule").fetchone())
+        self.assertNotIn('text', [c[1] for c in self.db.execute("PRAGMA table_info(card_vectors)")])
+
+    def test_existing_tags_are_classified_without_changing_ids(self):
+        legacy = sqlite3.connect(':memory:')
+        self.addCleanup(legacy.close)
+        legacy.execute("CREATE TABLE tags(id INTEGER PRIMARY KEY,name TEXT,normalizedName TEXT,createdAt INTEGER)")
+        legacy.execute("INSERT INTO tags VALUES (8,'认知','认知',99)")
+        legacy.execute("INSERT INTO tags VALUES (9,'长期主义','长期主义',100)")
+        for statement in migration('MIGRATION_6_7_STATEMENTS'):
+            legacy.execute(statement)
+        self.assertEqual([(8,1,'confirmed'),(9,2,'confirmed')], legacy.execute("SELECT id,level,status FROM tags ORDER BY id").fetchall())
 
 
 if __name__ == "__main__":

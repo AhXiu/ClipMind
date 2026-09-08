@@ -1,13 +1,169 @@
 openapi: 3.0.3
 info:
-  title: ClipMind Phase 1 API
-  version: 1.0.0
-  description: Android 采集、卡片查询、确认、回滚和同步重试接口。
+  title: ClipMind API
+  version: 1.1.0
+  description: Android 采集、知识关联、阅读内化与卡片管理。reading POST 无状态、128 KiB、25 秒超时，与知识归纳共享两个并发槽，不自动重试或发布。仅配置能力不代表可用性与效果验收。
 servers:
   - url: http://localhost:8080
 security:
   - bearerAuth: []
 paths:
+  /v1/reading/capabilities:
+    get:
+      summary: 查询阅读、检索与向量配置，不发送原文
+      responses:
+        '200':
+          description: 已配置的能力；空 embedding_model 表示未启用
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reading, search, embedding_model]
+                properties:
+                  reading: { type: boolean }
+                  search: { type: boolean }
+                  embedding_model: { type: string }
+        '401': { description: 未认证 }
+  /v1/reading:analyze:
+    post:
+      summary: 忠于原文的完整解读、受控标签、真实书目及可选文章
+      description: 客户端须预览原文及历史标签/已读标题范围并确认。模型由服务端配置，不接受客户端 URL 或 API Key。搜索缺失/失败以 warnings 显式告知；无已验证书目返回空列表。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReadingRequest' }
+      responses:
+        '200':
+          description: 结构已校验，语义仍需核对
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadingResponse' }
+        '400': { description: 格式、敏感内容或范围不合法 }
+        '401': { description: 未认证 }
+        '429': { description: 并发已满 }
+        '502': { description: 依赖或模型输出校验失败 }
+        '503': { description: 未配置 }
+  /v1/reading:embed:
+    post:
+      summary: 生成用于端侧索引的真实语义向量
+      description: 固定调用 OpenAI embeddings；每批 1–16 条，总共最多 16000 个 Unicode 字符。客户端按模型和原文修订缓存，余弦 Top-5 在本地执行。本接口不保存向量库。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [texts]
+              properties:
+                texts:
+                  type: array
+                  minItems: 1
+                  maxItems: 16
+                  items: { type: string, minLength: 1, maxLength: 6000 }
+      responses:
+        '200':
+          description: 已按输入顺序重排，精确模型身份一致、有限非零且维度一致
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [model, vectors]
+                properties:
+                  model: { type: string }
+                  vectors:
+                    type: array
+                    minItems: 1
+                    maxItems: 16
+                    items:
+                      type: array
+                      minItems: 8
+                      maxItems: 4096
+                      items: { type: number, format: double }
+        '400': { description: JSON 格式错误 }
+        '401': { description: 未认证 }
+        '429': { description: 并发已满 }
+        '502': { description: 输入范围/安全校验、向量模型或依赖校验失败 }
+        '503': { description: 向量服务未配置 }
+  /v1/reading:weekly:
+    post:
+      summary: 按明确给定的本周原文生成带引用的观点和主线
+      description: 客户端本地计算自然周、卡片数量和高频标签。最多 2000 张，总原文最多 16000 字。空周在客户端处理。响应是 KnowledgeResult 本体，没有 result 包装；relations 必须为空。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [cards]
+              properties:
+                cards:
+                  type: array
+                  minItems: 1
+                  maxItems: 2000
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id, revision, text]
+                    properties:
+                      id: { type: string, minLength: 1 }
+                      revision: { type: integer, format: int64, minimum: 1 }
+                      text: { type: string, minLength: 1, maxLength: 6000 }
+      responses:
+        '200':
+          description: 原文引用和比较来源已校验
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WeeklyResult' }
+        '400': { description: 格式、范围或敏感内容不合法 }
+        '401': { description: 未认证 }
+        '429': { description: 并发已满 }
+        '502': { description: 模型或引用校验失败 }
+        '503': { description: 未配置 }
+  /v1/reading:recommend:
+    post:
+      summary: 根据低覆盖分类探索不同主题的真实书籍
+      description: 全量历史的本地一级分类统计不是用户真实能力判断。排除已读及历史推荐标题；最多两个主题各一本，按标题/作者去重。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [counts, read_books, previous_books]
+              properties:
+                counts:
+                  type: object
+                  maxProperties: 7
+                  description: key 仅限固定一级分类
+                  additionalProperties: { type: integer, minimum: 0, maximum: 1000000 }
+                read_books:
+                  type: array
+                  description: 与 previous_books 合计不超过 1000 条
+                  items: { type: string, minLength: 1, maxLength: 300 }
+                previous_books:
+                  type: array
+                  items: { type: string, minLength: 1, maxLength: 300 }
+      responses:
+        '200':
+          description: 没有已验证书目时不编造推荐
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [focus_topics, books, basis]
+                properties:
+                  focus_topics: { type: array, minItems: 2, maxItems: 2, items: { $ref: '#/components/schemas/PrimaryTag' } }
+                  books: { type: array, maxItems: 2, items: { $ref: '#/components/schemas/VerifiedBook' } }
+                  basis: { type: string }
+        '400': { description: JSON 格式错误 }
+        '401': { description: 未认证 }
+        '429': { description: 并发已满 }
+        '502': { description: 输入范围/安全校验或模型输出校验失败 }
+        '503': { description: 未配置 }
   /v1/knowledge:synthesize:
     post:
       summary: 归纳用户明确选定的多张卡片并返回带原文证据的关系候选
@@ -144,6 +300,92 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    PrimaryTag:
+      type: string
+      enum: [人文, 商业, 技术, 认知, 职场, 社会, 随笔]
+    ReadingRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 6000 }
+        known_tags:
+          type: array
+          maxItems: 200
+          description: 已确认二级标签，不得包含一级分类；优先复用
+          items: { type: string, minLength: 1, maxLength: 30 }
+        read_books:
+          type: array
+          maxItems: 500
+          items: { type: string, minLength: 1, maxLength: 300 }
+        search_articles: { type: boolean, default: false }
+    TagSuggestion:
+      type: object
+      required: [name, status]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 30 }
+        status: { type: string, enum: [reused, pending] }
+    VerifiedBook:
+      type: object
+      required: [title, verified, openlibrary_key, confidence]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 300 }
+        author: { type: string, maxLength: 200 }
+        verified: { type: boolean, enum: [true] }
+        openlibrary_key: { type: string, pattern: '^/works/OL[0-9]+W$' }
+        confidence: { type: string, enum: [semantic, speculative], description: 元数据不可证明原文出处，高确定需客户端人工出处证据 }
+        reason: { type: string, maxLength: 300 }
+        topic: { type: string }
+    ReadingResponse:
+      type: object
+      required: [schema_version, provider, model, primary_tag, interpretation, secondary_tags, keywords, books, articles, value, value_reason, questions, warnings]
+      properties:
+        schema_version: { type: integer, enum: [2] }
+        provider: { type: string }
+        model: { type: string }
+        primary_tag: { $ref: '#/components/schemas/PrimaryTag' }
+        interpretation:
+          type: object
+          required: [summary, insight, action]
+          properties:
+            summary: { type: string, minLength: 1, maxLength: 4000, description: 核心释义 }
+            insight: { type: string, minLength: 1, maxLength: 4000, description: 场景应用 }
+            action: { type: string, minLength: 1, maxLength: 4000, description: 认知启发 }
+        secondary_tags: { type: array, maxItems: 5, items: { $ref: '#/components/schemas/TagSuggestion' } }
+        keywords: { type: array, minItems: 3, maxItems: 3, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 30 } }
+        books: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/VerifiedBook' } }
+        articles:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [title, url, summary, checked_at]
+            properties:
+              title: { type: string, maxLength: 300 }
+              url: { type: string, format: uri, description: 白名单 HTTPS 实际访问成功，不保证未来永久可达 }
+              summary: { type: string, minLength: 1, maxLength: 200 }
+              checked_at: { type: string, format: date-time }
+        value: { type: string, enum: [high, medium, low] }
+        value_reason: { type: string }
+        questions: { type: array, maxItems: 3, description: high 时至少两题, items: { type: string, minLength: 1, maxLength: 200 } }
+        warnings: { type: array, items: { type: string } }
+    WeeklyResult:
+      type: object
+      required: [title, points, relations]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 80 }
+        points:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            type: object
+            required: [kind, text, evidence]
+            properties:
+              kind: { type: string, enum: [summary, agreement, difference, question] }
+              text: { type: string, minLength: 1, maxLength: 1200 }
+              evidence: { type: array, minItems: 1, maxItems: 8, items: { $ref: '#/components/schemas/KnowledgeEvidence' } }
+        relations: { type: array, maxItems: 0, items: { $ref: '#/components/schemas/KnowledgeRelation' } }
     KnowledgeRequest:
       type: object
       additionalProperties: false
@@ -246,6 +488,7 @@ components:
       required: [provider, model, primary_tag, interpretation, books]
       description: 客户端 BYOK 的结构化结果；API key 不得提交到 backend。
       properties:
+        schema_version: { type: integer, description: 2 表示核心释义/场景应用/认知启发；缺省保留旧模板 }
         provider: { type: string, enum: [ark, openrouter] }
         model: { type: string, minLength: 1, maxLength: 200 }
         primary_tag: { type: string, enum: [人文, 商业, 技术, 认知, 职场, 社会, 随笔] }
@@ -273,6 +516,9 @@ components:
       type: object
       required: [id, card_id, number, created_at, clean_text, primary_tag, interpretation, books, llm_provider, llm_model, markdown]
       properties:
+        schema_version: { type: integer }
+        secondary_tags: { type: array, items: { $ref: '#/components/schemas/TagSuggestion' } }
+        keywords: { type: array, items: { type: string } }
         id: { type: string }
         card_id: { type: string }
         number: { type: integer, minimum: 1 }

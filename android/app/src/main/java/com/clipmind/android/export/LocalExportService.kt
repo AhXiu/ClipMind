@@ -11,7 +11,7 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-data class ExportSnapshot(val cards: List<LocalCard>, val confirmedRelations: List<CardRelationEntity>)
+data class ExportSnapshot(val cards: List<LocalCard>, val confirmedRelations: List<CardRelationEntity>, val documents: List<MarkdownFile> = emptyList(), val relationEvidence: Map<Long,com.clipmind.android.knowledge.RelationEvidence> = emptyMap())
 enum class ExportFormat(val mimeType: String, val extension: String) {
     OBSIDIAN_ZIP("application/zip", "zip"), CSV("text/csv", "csv"), PLAIN_TEXT("text/plain", "txt")
 }
@@ -38,10 +38,14 @@ class LocalExportService {
                     val otherId = if (relation.sourceCardId == card.id) relation.targetCardId else relation.sourceCardId
                     namesById[otherId]?.let { target ->
                         val targetCard = snapshot.cards.first { it.id == otherId }
-                        when (preferences.wikiLinkFormat) {
+                        val link = when (preferences.wikiLinkFormat) {
                             WikiLinkFormat.FILE_NAME -> "[[$target]]"
                             WikiLinkFormat.FILE_NAME_WITH_TITLE -> "[[$target|${escapeWikiAlias(titleFor(targetCard))}]]"
                         }
+                        val group = when(relation.relationType) { "supports" -> "相似观点"; "contradicts", "extends", "example" -> "对立／互补视角"; else -> "同主题" }
+                        val evidence = snapshot.relationEvidence[relation.id]
+                        val summary = if (relation.sourceCardId == card.id) evidence?.targetSummary else evidence?.sourceSummary
+                        "$group：$link · 卡片 $otherId · 摘要：${escapeMarkdownInline(summary ?: titleFor(targetCard))} · ${escapeMarkdownInline(evidence?.reason.orEmpty())}"
                     }
                 }.distinct().joinToString("\n")
             MarkdownFile("${names[index]}.md", renderMarkdown(card, links, preferences))
@@ -50,7 +54,7 @@ class LocalExportService {
 
     private fun writeZip(snapshot: ExportSnapshot, preferences: ExportPreferences, output: OutputStream) {
         ZipOutputStream(output.buffered()).use { zip ->
-            markdownFiles(snapshot, preferences).forEach { file ->
+            (markdownFiles(snapshot, preferences) + snapshot.documents).forEach { file ->
                 zip.putNextEntry(ZipEntry(file.fileName))
                 zip.write(file.content.toByteArray(StandardCharsets.UTF_8))
                 zip.closeEntry()
@@ -68,14 +72,9 @@ internal fun renderMarkdown(card: LocalCard, wikiLinks: String, preferences: Exp
             card.sourceUrl?.let { add("source_url: ${yamlQuote(it)}") }
         }
     }.takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "---\n", postfix = "\n---\n\n").orEmpty()
-    val body = preferences.markdownTemplate
-        .replace("{{title}}", escapeMarkdownInline(titleFor(card)))
-        .replace("{{content}}", card.content)
-        .replace("{{wikilinks}}", wikiLinks)
-        .replace("{{captured_at}}", Instant.ofEpochMilli(card.capturedAt).toString())
-        .replace("{{source_app}}", card.sourceApp.orEmpty())
-        .replace("{{source_url}}", card.sourceUrl.orEmpty())
-        .replace("{{tags}}", card.tags.joinToString(", ") { it.name })
+    val replacements = mapOf("standard_card" to standardCard(card,wikiLinks), "title" to escapeMarkdownInline(titleFor(card)), "content" to card.content,
+        "wikilinks" to wikiLinks,"captured_at" to Instant.ofEpochMilli(card.capturedAt).toString(),"source_app" to card.sourceApp.orEmpty(),"source_url" to card.sourceUrl.orEmpty(),"tags" to card.tags.joinToString(", ") { it.name })
+    val body = Regex("\\{\\{([a-z_]+)\\}\\}").replace(preferences.markdownTemplate) { match -> replacements[match.groupValues[1]] ?: match.value }
     return frontmatter + body.trimEnd() + "\n"
 }
 

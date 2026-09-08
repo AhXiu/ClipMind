@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.util.UUID
+import androidx.room.withTransaction
 
 data class CaptureUiModel(
     val id: Long,
@@ -55,11 +56,18 @@ class CaptureRepository(
         val state = initialCaptureState(mode, settings.aiEnabled.value, settings.aiAutoSubmit.value)
         val entity = try {
             val ai = settings.captureAiConfiguration()
-            createEncryptedCaptureEntity(normalized, hash, sourceApp, null, mode, state, now, cipher, ai)
+            createEncryptedCaptureEntity(rawText, hash, sourceApp, null, mode, state, now, cipher, ai)
         } catch (e: TextCipherException) {
             return CaptureDecision.EncryptionFailed("ENCRYPT_${e.error.name}")
         }
-        val id = dao.insert(entity)
+        val id = db.withTransaction {
+            val inserted = dao.insert(entity)
+            if (inserted != -1L) {
+                val backup = com.google.gson.Gson().toJson(mapOf("schema_version" to 1,"card_id" to inserted,"client_capture_id" to entity.clientCaptureId,"raw_text" to rawText,"source_app" to sourceApp,"captured_at" to now,"mode" to mode.name))
+                db.readingDao().saveDocument(com.clipmind.android.reading.ReaderDocument("raw:${entity.clientCaptureId}","raw_capture",cipher.encrypt(backup),now))
+            }
+            inserted
+        }
         val decision = if (id == -1L) CaptureDecision.Duplicate else CaptureDecision.Stored(id, state)
         if (shouldScheduleImmediateUpload(decision)) uploadScheduler.schedule()
         return decision

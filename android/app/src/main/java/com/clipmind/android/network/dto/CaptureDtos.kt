@@ -14,8 +14,12 @@ data class CaptureUploadItem(
     @SerializedName("source_url") val sourceUrl: String?,
     @SerializedName("mode") val mode: String,
     @SerializedName("captured_at") val capturedAt: String,
-    @SerializedName("client_analysis") val clientAnalysis: ClientAnalysis? = null,
+    @SerializedName("client_analysis") val clientAnalysis: UploadClientAnalysis? = null,
 )
+
+// Never upload local verification flags as trusted provider output.
+data class UploadClientAnalysis(val provider: String, val model: String, @SerializedName("primary_tag") val primaryTag: String, val interpretation: AnalysisInterpretation, val books: List<UploadBook>, @SerializedName("schema_version") val schemaVersion: Int)
+data class UploadBook(val title: String, val author: String)
 
 data class CaptureBatchRequest(
     @SerializedName("captures") val captures: List<CaptureUploadItem>,
@@ -53,4 +57,8 @@ data class ServerCardVersion(
     @SerializedName("interpretation") val interpretation: AnalysisInterpretation,
     @SerializedName("llm_provider") val provider: String,
     @SerializedName("llm_model") val model: String,
+    @SerializedName("schema_version") val schemaVersion: Int = 1,
+    @SerializedName("books") val books: List<AnalysisBook> = emptyList(),
+    @SerializedName("secondary_tags") val secondaryTags: List<AnalysisTag> = emptyList(),
+    @SerializedName("keywords") val keywords: List<String> = emptyList(),
 )

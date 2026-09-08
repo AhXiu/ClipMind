@@ -18,7 +18,7 @@ data class ExportPreferences(
 )
 
 object SettingsDefaults {
-    const val MARKDOWN_TEMPLATE = "{{content}}\n\n{{wikilinks}}"
+    const val MARKDOWN_TEMPLATE = "{{standard_card}}"
     const val MIN_CAPTURE_LENGTH = 8
 }
 
@@ -34,7 +34,7 @@ class UserSettings(private val prefs: SharedPreferences) {
     private val aiModeFlow = MutableStateFlow(readEnum("ai_mode", AiMode.SERVER_ARK))
     private val arkModelFlow = stringFlow("ark_model", AiDefaults.ARK_MODEL)
     private val openRouterModelFlow = stringFlow("openrouter_model", "")
-    private val markdownTemplateFlow = stringFlow("markdown_template", SettingsDefaults.MARKDOWN_TEMPLATE)
+    private val markdownTemplateFlow = stringFlow("markdown_template", SettingsDefaults.MARKDOWN_TEMPLATE).also { if(it.value == "{{content}}\n\n{{wikilinks}}") it.value = SettingsDefaults.MARKDOWN_TEMPLATE }
     private val wikiLinkFormatFlow = MutableStateFlow(readEnum("wikilink_format", WikiLinkFormat.FILE_NAME))
     private val frontmatterTagsFlow = booleanFlow("frontmatter_tags", true)
     private val frontmatterTimeFlow = booleanFlow("frontmatter_time", true)

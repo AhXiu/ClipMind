@@ -48,10 +48,10 @@ internal fun prepareUploadBatch(
 internal fun CaptureOutboxEntity.toUploadDto(plainText: String, clientAnalysis: ClientAnalysis? = null) = CaptureUploadItem(
     clientCaptureId = clientCaptureId,
     rawText = plainText,
-    textSha256 = hash,
+    textSha256 = java.security.MessageDigest.getInstance("SHA-256").digest(plainText.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) },
     sourceApp = sourceApp,
     sourceUrl = sourceUrl,
     mode = mode.name.lowercase(),
     capturedAt = Instant.ofEpochMilli(capturedAt).toString(),
-    clientAnalysis = clientAnalysis,
+    clientAnalysis = clientAnalysis?.let { com.clipmind.android.network.dto.UploadClientAnalysis(it.provider,it.model,it.primaryTag,it.interpretation,it.books.map { b -> com.clipmind.android.network.dto.UploadBook(b.title,b.author) },it.schemaVersion) },
 )

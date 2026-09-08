@@ -34,6 +34,7 @@ class ClipMindApp : Application() {
         container = AppContainer(this)
         container.shizuku.start()
         UploadScheduler.schedule(this)
+        com.clipmind.android.reading.LearningWorker.schedule(this)
     }
 }
 
@@ -77,6 +78,10 @@ class AppContainer(app: Application) {
     val localCardRepository = LocalCardRepository(database, textCipher, safetyFilter)
     val knowledgeRepository = KnowledgeRepository(database, textCipher, safetyFilter)
     val knowledgeClient = KnowledgeClient(api)
+    val learningSettings = com.clipmind.android.reading.LearningSettings(app)
+    val readingRepository = com.clipmind.android.reading.ReadingRepository(database, localCardRepository, textCipher, api, safetyFilter)
+    val semanticIndex = com.clipmind.android.reading.SemanticIndex(database, textCipher, api, safetyFilter)
+    val notionKeyStore = KeystoreApiKeySecretStore(app.getSharedPreferences("secure_notion_key", Application.MODE_PRIVATE), AndroidKeystoreTextCipher("clipmind_notion_key_v1"))
     val exportService = LocalExportService()
     val healthChecker = HealthChecker(api)
 }

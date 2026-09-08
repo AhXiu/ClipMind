@@ -1,4 +1,4 @@
-# ClipMind Android（Phase 1）
+# ClipMind Android
 
 这是单模块 Kotlin/Jetpack Compose Android 客户端。它通过 Shizuku UserService 执行固定的剪贴板读取操作，在本地过滤、去重并写入 Room outbox，再由 WorkManager 批量上报。
 
@@ -54,7 +54,7 @@ Debug Manifest 仅为当前 BOE 联调开放明文 HTTP；Release 构建不会�
 - 自动模式成功写入 `READY` 后会立即调度上传；确认模式写入 `PENDING_CONFIRMATION`，在 UI 确认并成功更新为 `READY` 后也会立即调度上传。15 分钟周期任务仅作为兜底。丢弃不会触发上传。
 - `/v1/captures:batch` 使用 snake_case DTO、RFC3339 `captured_at`、`Authorization` 与基于有序 client ID 集合 SHA-256 生成的稳定 `Idempotency-Key`。响应中的 `accepted[].client_capture_id` 才会转为 `SUCCEEDED`；`filtered_reject` 转为终态 `REJECTED`，其他拒绝或未明确确认的条目进入 `RETRYABLE_ERROR` 并指数退避。
 - Room 仅持久化 `encryptedRawText`：使用 Android Keystore 内不可导出的 AES-256 密钥和 `AES/GCM/NoPadding`，每条记录生成随机 12-byte IV；密文封装版本、IV、ciphertext 与独立 tag。日志中不记录剪贴板原文。
-- 当前 Phase 1 工程从未发布，因此加密后的最终 schema 直接定义为数据库 version 1，并移除了 `fallbackToDestructiveMigration`；不存在已发布明文 schema 的静默破坏性升级路径。后续版本必须提供显式 Migration。
+- Room 当前为 v7，保留显式迁移链，未启用 `fallbackToDestructiveMigration`。v6→v7 增加阅读结果、向量、独立文档和复习计划，原有一级标签迁移为固定分类。禁止直接降级或用清库替代迁移。
 - 上传与 UI 展示只在内存中短暂解密。认证失败、密文损坏或 Keystore 密钥失效时绝不上传密文/垃圾数据，记录结构化错误并转为可见终态 `DECRYPTION_FAILED`；UI 显示“内容无法解密”。
 - Keystore 密钥通常随应用数据生命周期存在。系统安全状态变化可能使密钥失效；清除应用数据或卸载会同时删除密钥和本地数据库。若数据库被单独恢复但密钥不存在，历史密文无法恢复，只能丢弃相应记录或清除应用数据，客户端不会生成替代固定密钥尝试解密。
 
@@ -63,6 +63,10 @@ Debug Manifest 仅为当前 BOE 联调开放明文 HTTP；Release 构建不会�
 Manifest 仅声明联网、通知和前台服务（含 Android 14 `specialUse` 类型）所需权限。项目没有声明或实现 AccessibilityService。
 
 ## 测试
+
+本轮导航调整为「采集 / 卡片 / 知识 / 复习 / 设置」。详情页提供完整解读与向量关联；知识页管理关系、标签、已读书籍和探索推荐；复习页提供每日卡片、批注、周报和 Notion 输出。提醒、自动分析、自动关联和自动周报默认关闭，开启前展示后续数据发送范围与费用说明。具体配置、真实联调门槛和能力边界见 [阅读闭环说明](../docs/reading-loop.md)。
+
+本地验证使用 `./gradlew testDebugUnitTest lintDebug assembleDebug -Pclipmind.baseUrl=https://example.invalid/`；该 APK 不连接实际后端。`python3 scripts/check_migration.py` 含 v7 SQLite 数据保留检查，不能替代 Android 设备上的真实 Room 打开验证。
 
 第二阶段支持本地关键词关联、选定多卡归纳、加密主题笔记与原文引用跳转。Room v6 增加关系证据和主题笔记表，保留完整显式迁移链。使用和隐私边界见 [知识能力说明](../docs/phase2-knowledge.md)。
 

@@ -126,7 +126,7 @@ func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
 	}); e != nil {
 		return e
 	}
-	clean := strings.Join(strings.Fields(c.Text), " ")
+	clean := c.Text
 	var result llm.Result
 	var last error
 	providerName, modelName := llm.Identity(w.LLM)
@@ -161,7 +161,18 @@ func (w *Worker) process(ctx context.Context, c *domain.Capture) error {
 	result.Books = w.Books.Verify(ctx, result.Books)
 	now := time.Now().UTC()
 	v := domain.CardVersion{ID: service.ID("ver_"), CardID: card.ID, CreatedAt: now, CleanText: clean, PrimaryTag: result.PrimaryTag, Interpretation: result.Interpretation, Books: result.Books, LLMProvider: providerName, LLMModel: modelName}
-	v.Markdown = render.Markdown(card.ID, now.Format(time.RFC3339), clean, v.PrimaryTag, v.Interpretation, v.Books)
+	v.SchemaVersion = 2
+	if c.ClientAnalysis != nil && c.ClientAnalysis.SchemaVersion < 2 {
+		v.SchemaVersion = 1
+	}
+	v.Keywords = result.Keywords
+	for _, tag := range result.SecondaryTags {
+		v.SecondaryTags = append(v.SecondaryTags, domain.TagSuggestion{Name: tag, Status: "pending"})
+	}
+	v.Markdown = render.FullMarkdown(card.ID, c.CapturedAt.Format(time.RFC3339), clean, c.SourceApp, c.SourceURL, v.PrimaryTag, v.Interpretation, v.SecondaryTags, v.Books, nil)
+	if v.SchemaVersion < 2 {
+		v.Markdown = render.Markdown(card.ID, now.Format(time.RFC3339), clean, v.PrimaryTag, v.Interpretation, v.Books)
+	}
 	if e = c.Move(domain.StatusAISucceeded, now); e != nil {
 		return e
 	}

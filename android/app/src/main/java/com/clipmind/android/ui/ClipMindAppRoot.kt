@@ -25,6 +25,7 @@ fun ClipMindAppRoot(
     onExport: (ExportFormat) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(AppTab.CAPTURE) }
+    LaunchedEffect(state.reviewNavigation) { if (state.reviewNavigation > 0) tab = AppTab.REVIEW }
     var confirmLeave by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val detail = state.selectedCard
@@ -82,6 +83,7 @@ fun ClipMindAppRoot(
             AppTab.CAPTURE -> CaptureHomeScreen(state, vm, padding, onStartCapture, onVoiceInput, onOpenShizuku)
             AppTab.LIBRARY -> LibraryScreen(state, vm, padding)
             AppTab.AI -> AiWorkbenchScreen(state, vm, padding, onExport)
+            AppTab.REVIEW -> ReviewScreen(state, vm, padding, onCopy)
             AppTab.SETTINGS -> SettingsScreen(state, vm, padding, onOpenShizuku)
         }
     }
@@ -93,10 +95,11 @@ fun ClipMindAppRoot(
         dismissButton = { TextButton({ confirmLeave = false }) { Text("继续编辑") } },
     )
     KnowledgeDialogs(state, vm, onCopy)
+    LearningDialogs(state, vm)
     if (state.pendingDeletion.isNotEmpty()) AlertDialog(
         onDismissRequest = vm::cancelDeletion,
         title = { Text("删除 ${state.pendingDeletion.size} 张本地卡片？") },
-        text = { Text("卡片将从本机列表移除。此操作不会撤回正在发送的内容，也不会删除云端、Obsidian 或主题笔记中的历史副本；主题笔记需单独删除。") },
+        text = { Text("卡片将从本机列表移除，不是安全擦除。此操作不会撤回正在发送的内容，也不会删除原始备份、云端、Obsidian、Notion、主题笔记、周报或批注中的历史副本；这些副本需单独管理。") },
         confirmButton = { TextButton({ vm.confirmDeletion() }) { Text("删除本地卡片") } },
         dismissButton = { TextButton(vm::cancelDeletion) { Text("取消") } },
     )

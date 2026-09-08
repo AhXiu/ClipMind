@@ -8,7 +8,19 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-internal const val CLIPMIND_DATABASE_VERSION = 6
+internal const val CLIPMIND_DATABASE_VERSION = 7
+internal val MIGRATION_6_7_STATEMENTS = listOf(
+    "ALTER TABLE tags ADD COLUMN level INTEGER NOT NULL DEFAULT 2",
+    "ALTER TABLE tags ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'",
+    "UPDATE tags SET level = 1 WHERE name IN ('人文','商业','技术','认知','职场','社会','随笔')",
+    "CREATE TABLE IF NOT EXISTS card_reading (cardId INTEGER NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, encryptedPayload TEXT NOT NULL, updatedAt INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS card_vectors (cardId INTEGER NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, model TEXT NOT NULL, encryptedVector TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS reader_documents (id TEXT NOT NULL PRIMARY KEY, kind TEXT NOT NULL, encryptedPayload TEXT NOT NULL, updatedAt INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS review_schedule (cardId INTEGER NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, dueAt INTEGER NOT NULL, intervalDays INTEGER NOT NULL, repetitions INTEGER NOT NULL, ease REAL NOT NULL, lastReviewDay TEXT NOT NULL)",
+)
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) { MIGRATION_6_7_STATEMENTS.forEach(db::execSQL) }
+}
 internal val MIGRATION_5_6_STATEMENTS = listOf(
     "ALTER TABLE card_relations ADD COLUMN encryptedEvidence TEXT",
     "ALTER TABLE card_relations ADD COLUMN sourceRevision INTEGER NOT NULL DEFAULT 0",
@@ -77,7 +89,7 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 }
 
 @Database(
-    entities = [LocalCardEntity::class, SyncMetadataEntity::class, TagEntity::class, CardTagRefEntity::class, CardRelationEntity::class, KnowledgeNoteEntity::class],
+    entities = [LocalCardEntity::class, SyncMetadataEntity::class, TagEntity::class, CardTagRefEntity::class, CardRelationEntity::class, KnowledgeNoteEntity::class, com.clipmind.android.reading.ReadingEntity::class, com.clipmind.android.reading.VectorEntity::class, com.clipmind.android.reading.ReaderDocument::class, com.clipmind.android.reading.ReviewEntity::class],
     version = CLIPMIND_DATABASE_VERSION,
     exportSchema = false,
 )
@@ -85,10 +97,11 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 abstract class ClipMindDatabase : RoomDatabase() {
     abstract fun captureOutboxDao(): CaptureOutboxDao
     abstract fun localCardDao(): LocalCardDao
+    abstract fun readingDao(): com.clipmind.android.reading.ReadingDao
 
     companion object {
         fun create(context: Context): ClipMindDatabase = Room.databaseBuilder(
             context.applicationContext, ClipMindDatabase::class.java, "clipmind.db",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
     }
 }

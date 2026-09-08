@@ -153,6 +153,7 @@ func (s *Service) ingest(key string, items []CaptureInput, targetCardID string) 
 			out.Rejected = append(out.Rejected, Rejected{ClientCaptureID: in.ClientCaptureID, Code: "filtered_reject", Message: reason})
 			continue
 		}
+		clean = in.RawText
 		now := s.Now().UTC()
 		captured := in.CapturedAt
 		if captured.IsZero() {
@@ -162,7 +163,15 @@ func (s *Service) ingest(key string, items []CaptureInput, targetCardID string) 
 		if targetCardID != "" {
 			cardID = targetCardID
 		}
-		path, e := s.Backup.Save(cid, []byte(in.RawText))
+		rawJSON, e := json.Marshal(struct {
+			SchemaVersion int `json:"schema_version"`
+			CaptureInput
+		}{1, in})
+		if e != nil {
+			cleanup()
+			return out, e
+		}
+		path, e := s.Backup.Save(cid, rawJSON)
 		if e != nil {
 			cleanup()
 			return out, e

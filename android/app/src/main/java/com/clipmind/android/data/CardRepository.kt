@@ -60,7 +60,7 @@ class CardRepository(
                     dao.updateServerCardError(id, cardId, taskId, "ANALYSIS_RESULT_UNAVAILABLE", System.currentTimeMillis())
                     return@withContext ServerCardOperationResult.Failure("ANALYSIS_RESULT_UNAVAILABLE")
                 }
-                cipher.encrypt(Gson().toJson(ClientAnalysis(version.provider, version.model, version.primaryTag, version.interpretation, emptyList())))
+                cipher.encrypt(Gson().toJson(ClientAnalysis(version.provider, version.model, version.primaryTag, version.interpretation, version.books.orEmpty().filter { it.verified }, version.schemaVersion,version.secondaryTags.orEmpty(),version.keywords.orEmpty())))
             } else null
             if (dao.updateServerCard(id, cardId, taskId, card.status, card.lastError, analysis, System.currentTimeMillis()) != 1) {
                 return@withContext ServerCardOperationResult.Failure("STALE_ANALYSIS_TASK")

@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun acceptSharedText(intent: Intent?) {
+        if (intent?.getBooleanExtra("open_review",false) == true) viewModel.requestReview()
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf(String::isNotBlank)?.let { viewModel.importDraft(it) }
         }

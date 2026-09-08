@@ -8,6 +8,7 @@ import (
 	"clipmind/backend/internal/llm"
 	"clipmind/backend/internal/metrics"
 	"clipmind/backend/internal/pipeline"
+	"clipmind/backend/internal/reading"
 	"clipmind/backend/internal/security"
 	"clipmind/backend/internal/service"
 	"clipmind/backend/internal/store"
@@ -67,6 +68,15 @@ func main() {
 	api := &httpapi.Server{Capture: capture, Cards: cards, Metrics: m, AuthDisabled: cfg.AuthDisabled, Token: cfg.AuthToken, Log: log.Default()}
 	if completer, ok := provider.(knowledge.Completer); ok {
 		api.Knowledge = &knowledge.Service{Provider: completer}
+		if analyzer, supported := provider.(reading.Analyzer); supported {
+			api.Reading = &reading.Service{Analyzer: analyzer, Books: bookVerifier, Provider: provider.(llm.IdentifiedProvider).Name(), Model: provider.(llm.IdentifiedProvider).Model()}
+			if key := os.Getenv("BRAVE_SEARCH_API_KEY"); key != "" {
+				api.Reading.Search = &reading.BraveSearch{Key: key, Client: reading.PublicClient(), Summarizer: completer}
+			}
+		}
+	}
+	if model, key := os.Getenv("CLIPMIND_EMBEDDING_MODEL"), os.Getenv("OPENAI_API_KEY"); model != "" && key != "" {
+		api.Embeddings = &reading.EmbeddingService{Key: key, Model: model, Client: reading.PublicClient()}
 	}
 	srv := &http.Server{Addr: cfg.Addr, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {

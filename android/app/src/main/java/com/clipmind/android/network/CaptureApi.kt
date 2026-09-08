@@ -11,6 +11,16 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface CaptureApi {
+    @POST("v1/reading:recommend")
+    suspend fun recommendReading(@Header("Authorization") authorization: String?, @Body request: com.clipmind.android.reading.RecommendationRequest): Response<com.clipmind.android.reading.RecommendationResponse>
+    @POST("v1/reading:weekly")
+    suspend fun weeklyReading(@Header("Authorization") authorization: String?, @Body request: com.clipmind.android.reading.WeeklyRequest): Response<com.clipmind.android.knowledge.KnowledgeResult>
+    @GET("v1/reading/capabilities")
+    suspend fun readingCapabilities(@Header("Authorization") authorization: String?): Response<com.clipmind.android.reading.ReadingCapabilities>
+    @POST("v1/reading:analyze")
+    suspend fun analyzeReading(@Header("Authorization") authorization: String?, @Body request: com.clipmind.android.reading.ReadingRequest): Response<com.clipmind.android.network.dto.ClientAnalysis>
+    @POST("v1/reading:embed")
+    suspend fun embedReading(@Header("Authorization") authorization: String?, @Body request: com.clipmind.android.reading.EmbeddingRequest): Response<com.clipmind.android.reading.EmbeddingResponse>
     @POST("v1/knowledge:synthesize")
     suspend fun synthesize(
         @Header("Authorization") authorization: String?,

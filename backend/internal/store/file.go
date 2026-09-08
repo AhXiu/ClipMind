@@ -77,13 +77,18 @@ func cloneState(src state) state {
 		dst.Cards[k] = v
 	}
 	for k, v := range src.Versions {
-		v.Books = append([]domain.BookCandidate(nil), v.Books...)
-		dst.Versions[k] = v
+		dst.Versions[k] = cloneVersion(v)
 	}
 	for k, v := range src.Receipts {
 		dst.Receipts[k] = append(json.RawMessage(nil), v...)
 	}
 	return dst
+}
+func cloneVersion(v domain.CardVersion) domain.CardVersion {
+	v.Books = append([]domain.BookCandidate(nil), v.Books...)
+	v.SecondaryTags = append([]domain.TagSuggestion(nil), v.SecondaryTags...)
+	v.Keywords = append([]string(nil), v.Keywords...)
+	return v
 }
 func (r *FileRepository) persistState(s state) error {
 	if e := os.MkdirAll(filepath.Dir(r.path), 0700); e != nil {
@@ -203,7 +208,7 @@ func (t *fileTx) AddVersion(v domain.CardVersion) (domain.CardVersion, error) {
 		}
 	}
 	v.Number = max + 1
-	t.s.Versions[v.ID] = v
+	t.s.Versions[v.ID] = cloneVersion(v)
 	return v, nil
 }
 func (r *FileRepository) GetReceipt(k string) ([]byte, bool, error) {
@@ -369,7 +374,7 @@ func (r *FileRepository) AddVersion(v domain.CardVersion) (domain.CardVersion, e
 		}
 	}
 	v.Number = max + 1
-	next.Versions[v.ID] = v
+	next.Versions[v.ID] = cloneVersion(v)
 	if e := r.persistState(next); e != nil {
 		return v, e
 	}
@@ -384,8 +389,7 @@ func (r *FileRepository) GetVersion(id string) (domain.CardVersion, error) {
 	if !ok {
 		return v, ErrNotFound
 	}
-	v.Books = append([]domain.BookCandidate(nil), v.Books...)
-	return v, nil
+	return cloneVersion(v), nil
 }
 func (r *FileRepository) ListVersions(cardID string) ([]domain.CardVersion, error) {
 	r.mu.RLock()
@@ -393,8 +397,7 @@ func (r *FileRepository) ListVersions(cardID string) ([]domain.CardVersion, erro
 	a := []domain.CardVersion{}
 	for _, v := range r.s.Versions {
 		if v.CardID == cardID {
-			v.Books = append([]domain.BookCandidate(nil), v.Books...)
-			a = append(a, v)
+			a = append(a, cloneVersion(v))
 		}
 	}
 	sort.Slice(a, func(i, j int) bool { return a[i].Number < a[j].Number })

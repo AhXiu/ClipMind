@@ -61,6 +61,8 @@ data class TagEntity(
     val name: String,
     val normalizedName: String,
     val createdAt: Long,
+    @ColumnInfo(defaultValue = "2") val level: Int = 2,
+    @ColumnInfo(defaultValue = "'confirmed'") val status: String = "confirmed",
 )
 
 @Entity(
@@ -117,4 +119,6 @@ data class LocalCardWithTags(
     val tags: List<TagEntity>,
     @Relation(parentColumn = "id", entityColumn = "cardId")
     val sync: SyncMetadataEntity? = null,
+    @Relation(parentColumn = "id", entityColumn = "cardId")
+    val reading: com.clipmind.android.reading.ReadingEntity? = null,
 )

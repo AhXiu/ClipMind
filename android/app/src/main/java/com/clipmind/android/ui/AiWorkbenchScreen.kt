@@ -44,6 +44,7 @@ fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingVal
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        item { KnowledgeOverview(state,vm) }
         item {
             FlatCard(Modifier.fillMaxWidth()) {
                 Text("从摘录到主题笔记", style = MaterialTheme.typography.titleLarge)
@@ -112,7 +113,7 @@ fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingVal
             FlatCard(Modifier.fillMaxWidth()) {
                 Text("保存本地副本", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "通过系统文件选择器导出未删除的本地卡片。",
+                    "ZIP 包含当前卡片、周报、批注及原始 JSON 备份，导出后为明文。历史副本可能仍含已删除卡片的引用，请保存到可信位置。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )

@@ -24,7 +24,8 @@ import com.clipmind.android.network.BatchRequestMetadata
 enum class AppTab(val title: String, val label: String, val subtitle: String) {
     CAPTURE("采集", "采集", "随手记录，沉淀想法"),
     LIBRARY("卡片库", "卡片", "搜索与整理本地内容"),
-    AI("AI 工作台", "AI", "处理、发现与导出"),
+    AI("知识工作台", "知识", "关联、归纳与知识覆盖"),
+    REVIEW("今日复习", "复习", "回忆、思考、写下自己的理解"),
     SETTINGS("设置", "设置", "偏好与服务配置"),
 }
 enum class CardTimeFilter { ALL, TODAY, WEEK }
@@ -98,6 +99,13 @@ data class MainUiState(
     val savingDraft: Boolean = false,
     val knowledge: KnowledgeUiState = KnowledgeUiState(),
     val relationEvidence: Map<Long, RelationEvidence> = emptyMap(),
+    val learning: LearningUiState = LearningUiState(),
+    val learningPreferences: com.clipmind.android.reading.LearningPreferences = com.clipmind.android.reading.LearningPreferences(),
+    val allTags: List<TagEntity> = emptyList(),
+    val readerDocuments: List<com.clipmind.android.reading.DocumentView> = emptyList(),
+    val reviewSchedule: List<com.clipmind.android.reading.ReviewEntity> = emptyList(),
+    val clock: Long = System.currentTimeMillis(),
+    val reviewNavigation: Int = 0,
 )
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -118,6 +126,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val pullingResults = MutableStateFlow(false)
     private val savingDraft = MutableStateFlow(false)
     private val message = MutableStateFlow<String?>(null)
+    private val reviewNavigation = MutableStateFlow(0)
+    fun requestReview() { reviewNavigation.value += 1 }
     private val exportState = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
     val knowledge = KnowledgeController(
         viewModelScope, container.knowledgeRepository, container.knowledgeClient,
@@ -126,6 +136,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         { BatchRequestMetadata.authorizationHeader(container.tokenStore.readToken().orEmpty()) },
         { message.value = it },
     )
+    val learning = LearningController(viewModelScope,container) { message.value = it }
+    fun setLearningPreferences(value: com.clipmind.android.reading.LearningPreferences) {
+        container.learningSettings.update(value)
+        com.clipmind.android.reading.LearningWorker.schedule(app)
+    }
+    fun saveNotionKey(value: String) { container.notionKeyStore.overwrite(value) }
+    fun clearNotionKey() { container.notionKeyStore.clear() }
 
     private val baseState = combine(
         container.shizuku.state, container.settings.captureRequested, container.settings.mode,
@@ -133,6 +150,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) { shizuku, capture, mode, pending, recent -> MainUiState(shizuku, capture, mode, pending = pending, recent = recent) }
 
     val uiState: StateFlow<MainUiState> = baseState
+        .combine(reviewNavigation) { state, value -> state.copy(reviewNavigation = value) }
+        .combine(learning.state) { state, value -> state.copy(learning = value) }
+        .combine(container.learningSettings.state) { state, value -> state.copy(learningPreferences = value) }
+        .combine(container.database.localCardDao().observeTags()) { state, value -> state.copy(allTags = value) }
+        .combine(container.readingRepository.dao.observeDocuments().map { rows -> rows.mapNotNull(container.readingRepository::decode) }.flowOn(Dispatchers.Default)) { state, value -> state.copy(readerDocuments = value) }
+        .combine(container.readingRepository.dao.observeReviews()) { state, value -> state.copy(reviewSchedule = value) }
+        .combine(flow { while (true) { emit(System.currentTimeMillis()); kotlinx.coroutines.delay(30_000) } }) { state, value -> state.copy(clock = value) }
         .combine(container.localCardRepository.observeCards()) { state, cards -> state.copy(localCards = cards) }
         .combine(container.tokenStore.configured) { state, value -> state.copy(tokenConfigured = value) }
         .combine(connectionState) { state, value -> state.copy(connectionState = value) }
@@ -242,7 +266,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (selectedCardId.value in ids) closeCard()
         message.value = "已删除本地卡片；已上传或导出的副本不受影响"
     }
-    fun addTag(ids: Set<Long>, tag: String) = viewModelScope.launch { container.localCardRepository.addTag(ids, tag) }
+    fun addTag(ids: Set<Long>, tag: String) = viewModelScope.launch {
+        runCatching { container.localCardRepository.addTag(ids, tag) }.onFailure { message.value = "标签无效，请使用1–30字的名称" }
+    }
+    fun removeTag(id: Long, tag: Long) = viewModelScope.launch { container.localCardRepository.removeTag(id,tag) }
     fun queueAi(ids: Set<Long>) = viewModelScope.launch {
         if (!container.settings.aiEnabled.value) {
             message.value = "AI 已关闭，请先在设置中启用"

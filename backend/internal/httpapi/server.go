@@ -3,6 +3,7 @@ package httpapi
 import (
 	"clipmind/backend/internal/knowledge"
 	"clipmind/backend/internal/metrics"
+	"clipmind/backend/internal/reading"
 	"clipmind/backend/internal/service"
 	"clipmind/backend/internal/store"
 	"context"
@@ -23,6 +24,8 @@ type Server struct {
 	Token        string
 	Log          *log.Logger
 	Knowledge    *knowledge.Service
+	Reading      *reading.Service
+	Embeddings   *reading.EmbeddingService
 }
 type apiError struct {
 	Error struct {
@@ -58,8 +61,20 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.batch(w, r, rid)
 		return
 	}
+	if r.URL.Path == "/v1/reading/capabilities" && r.Method == http.MethodGet {
+		model := ""
+		if s.Embeddings != nil {
+			model = s.Embeddings.Model
+		}
+		s.write(w, 200, map[string]any{"embedding_model": model, "reading": s.Reading != nil, "search": s.Reading != nil && s.Reading.Search != nil})
+		return
+	}
 	if r.URL.Path == "/v1/knowledge:synthesize" && r.Method == http.MethodPost {
 		s.synthesize(w, r, rid)
+		return
+	}
+	if r.Method == http.MethodPost && (r.URL.Path == "/v1/reading:analyze" || r.URL.Path == "/v1/reading:embed" || r.URL.Path == "/v1/reading:weekly" || r.URL.Path == "/v1/reading:recommend") {
+		s.readingRoute(w, r, rid)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/cards/") {
@@ -67,6 +82,72 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.err(w, 404, "not_found", "route not found", rid)
+}
+
+func (s *Server) readingRoute(w http.ResponseWriter, r *http.Request, rid string) {
+	select {
+	case synthesisSlots <- struct{}{}:
+		defer func() { <-synthesisSlots }()
+	default:
+		s.err(w, 429, "busy", "analysis concurrency limit reached", rid)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
+	dec.DisallowUnknownFields()
+	var out any
+	var err error
+	if r.URL.Path == "/v1/reading:recommend" {
+		var input reading.RecommendationRequest
+		if dec.Decode(&input) != nil || dec.Decode(new(any)) != io.EOF {
+			s.err(w, 400, "invalid_request", "invalid profile request", rid)
+			return
+		}
+		if s.Reading == nil {
+			s.err(w, 503, "not_configured", "reading provider unavailable", rid)
+			return
+		}
+		out, err = s.Reading.Recommend(ctx, input)
+	} else if r.URL.Path == "/v1/reading:weekly" {
+		var input reading.WeeklyRequest
+		if dec.Decode(&input) != nil || dec.Decode(new(any)) != io.EOF || reading.ValidateWeek(input) != nil {
+			s.err(w, 400, "invalid_request", "weekly source limits exceeded or unsafe", rid)
+			return
+		}
+		if s.Knowledge == nil {
+			s.err(w, 503, "not_configured", "weekly provider unavailable", rid)
+			return
+		}
+		out, err = reading.GenerateWeek(ctx, s.Knowledge.Provider, input)
+	} else if r.URL.Path == "/v1/reading:embed" {
+		var input reading.EmbeddingRequest
+		if dec.Decode(&input) != nil || dec.Decode(new(any)) != io.EOF {
+			s.err(w, 400, "invalid_request", "invalid embedding request", rid)
+			return
+		}
+		if s.Embeddings == nil {
+			s.err(w, 503, "not_configured", "embedding provider not configured", rid)
+			return
+		}
+		out, err = s.Embeddings.Embed(ctx, input)
+	} else {
+		var input reading.Request
+		if dec.Decode(&input) != nil || dec.Decode(new(any)) != io.EOF || reading.Validate(input) != nil {
+			s.err(w, 400, "invalid_request", "invalid or unsafe analysis input", rid)
+			return
+		}
+		if s.Reading == nil {
+			s.err(w, 503, "not_configured", "reading provider not configured", rid)
+			return
+		}
+		out, err = s.Reading.Generate(ctx, input)
+	}
+	if err != nil {
+		s.err(w, 502, "reading_failed", "provider or response validation failed", rid)
+		return
+	}
+	s.write(w, 200, out)
 }
 
 var synthesisSlots = make(chan struct{}, 2)

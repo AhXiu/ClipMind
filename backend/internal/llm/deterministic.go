@@ -10,7 +10,10 @@ import (
 
 type Deterministic struct{}
 
-func (Deterministic) CompleteJSON(_ context.Context, _, user string) (string, error) {
+func (Deterministic) CompleteJSON(_ context.Context, system, user string) (string, error) {
+	if strings.HasPrefix(system, "recommend-v1") {
+		return `{"books":[]}`, nil
+	}
 	var input knowledge.Request
 	if err := json.Unmarshal([]byte(user), &input); err != nil {
 		return "", err
@@ -29,6 +32,15 @@ func (Deterministic) CompleteJSON(_ context.Context, _, user string) (string, er
 
 func (Deterministic) Name() string  { return "deterministic" }
 func (Deterministic) Model() string { return "deterministic" }
+
+func (d Deterministic) AnalyzeContext(ctx context.Context, text string, _ []string) (Result, error) {
+	r, e := d.Analyze(ctx, text)
+	r.Keywords = []string{"摘录", "阅读", "思考"}
+	r.Value = "medium"
+	r.ValueReason = "离线测试数据，不代表模型价值评估"
+	r.Questions = []string{}
+	return r, e
+}
 
 func (Deterministic) Analyze(_ context.Context, text string) (Result, error) {
 	clean := strings.Join(strings.Fields(text), " ")

@@ -98,6 +98,21 @@ type BookCandidate struct {
 	Author         string `json:"author,omitempty"`
 	OpenLibraryKey string `json:"openlibrary_key,omitempty"`
 	Verified       bool   `json:"verified"`
+	Confidence     string `json:"confidence,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	Topic          string `json:"topic,omitempty"`
+}
+
+type TagSuggestion struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+type Article struct {
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Summary   string `json:"summary"`
+	CheckedAt string `json:"checked_at"`
 }
 
 type ClientBook struct {
@@ -106,6 +121,7 @@ type ClientBook struct {
 }
 
 type ClientAnalysis struct {
+	SchemaVersion  int            `json:"schema_version,omitempty"`
 	Provider       string         `json:"provider"`
 	Model          string         `json:"model"`
 	PrimaryTag     string         `json:"primary_tag"`
@@ -162,6 +178,9 @@ type CardVersion struct {
 	LLMProvider    string          `json:"llm_provider"`
 	LLMModel       string          `json:"llm_model"`
 	Markdown       string          `json:"markdown"`
+	SchemaVersion  int             `json:"schema_version,omitempty"`
+	SecondaryTags  []TagSuggestion `json:"secondary_tags,omitempty"`
+	Keywords       []string        `json:"keywords,omitempty"`
 }
 
 type Card struct {
