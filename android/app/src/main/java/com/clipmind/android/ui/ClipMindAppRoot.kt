@@ -3,6 +3,8 @@ package com.clipmind.android.ui
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.semantics.contentDescription
@@ -27,6 +29,9 @@ fun ClipMindAppRoot(
     var tab by rememberSaveable { mutableStateOf(AppTab.LIBRARY) }
     var secondary by rememberSaveable { mutableStateOf<AppTab?>(null) }
     var composerPosition by rememberMovableDialogPosition()
+    var captureButtonFraction by rememberSaveable { mutableFloatStateOf(1f) }
+    var snackbarHeight by remember { mutableIntStateOf(0) }
+    val snackbarBottomSpace = with(LocalDensity.current) { snackbarHeight.toDp() }
     val screen = secondary ?: tab
     val libraryScroll = rememberLazyListState()
     LaunchedEffect(state.reviewNavigation) { if (state.reviewNavigation > 0) { tab = AppTab.REVIEW; secondary = null } }
@@ -90,20 +95,25 @@ fun ClipMindAppRoot(
                 }
             }
         },
-        floatingActionButton = {
-            if (detail == null && secondary == null) FloatingActionButton(vm::openComposer,
-                Modifier.semantics { contentDescription = "记录卡片：输入、粘贴或语音" }) { Text("+") }
-        },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { SnackbarHost(snackbar, Modifier.onSizeChanged { snackbarHeight = it.height }) },
     ) { padding ->
-        if (detail != null) CardDetailScreen(state, vm, padding, onCopy)
-        else when (screen) {
-            AppTab.CAPTURE -> CaptureHomeScreen(state, vm, padding, onStartCapture, onVoiceInput, onOpenShizuku)
-            AppTab.LIBRARY -> LibraryScreen(state, vm, padding, libraryScroll)
-            AppTab.AI -> TopicScreen(state, vm, padding)
-            AppTab.REVIEW -> ReviewScreen(state, vm, padding, onCopy)
-            AppTab.SETTINGS -> SettingsScreen(state, vm, padding, onOpenShizuku, onExport) { secondary = AppTab.CAPTURE }
-            AppTab.STATUS -> AiWorkbenchScreen(state, vm, padding, onExport)
+        Box(Modifier.fillMaxSize()) {
+            if (detail != null) CardDetailScreen(state, vm, padding, onCopy)
+            else when (screen) {
+                AppTab.CAPTURE -> CaptureHomeScreen(state, vm, padding, onStartCapture, onVoiceInput, onOpenShizuku)
+                AppTab.LIBRARY -> LibraryScreen(state, vm, padding, libraryScroll)
+                AppTab.AI -> TopicScreen(state, vm, padding)
+                AppTab.REVIEW -> ReviewScreen(state, vm, padding, onCopy)
+                AppTab.SETTINGS -> SettingsScreen(state, vm, padding, onOpenShizuku, onExport) { secondary = AppTab.CAPTURE }
+                AppTab.STATUS -> AiWorkbenchScreen(state, vm, padding, onExport)
+            }
+            if (detail == null && secondary == null) DraggableCaptureButton(
+                fraction = captureButtonFraction,
+                onPositionChange = { captureButtonFraction = it },
+                onClick = vm::openComposer,
+                modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
+                    .imePadding().padding(16.dp).padding(bottom = snackbarBottomSpace),
+            )
         }
     }
     if (state.composerOpen) MovableDialog(
