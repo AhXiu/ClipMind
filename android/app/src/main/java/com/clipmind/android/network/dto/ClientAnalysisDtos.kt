@@ -35,7 +35,12 @@ data class AnalysisBook(
 )
 
 data class AnalysisTag(val name: String, val status: String)
-data class ReadingArticle(val title: String, val url: String, val summary: String, @SerializedName("checked_at") val checkedAt: String)
+data class ReadingArticle(
+    val title: String, val url: String, val summary: String,
+    @SerializedName("checked_at") val checkedAt: String,
+    val relation: String? = null, val reason: String? = null, val quote: String? = null,
+    @SerializedName("source_quote") val sourceQuote: String? = null,
+)
 
 internal data class ProviderAnalysis(
     @SerializedName("primary_tag") val primaryTag: String?,

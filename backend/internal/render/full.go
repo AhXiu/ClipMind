@@ -65,6 +65,9 @@ func FullMarkdown(id, captured, raw, source, sourceURL, primary string, in domai
 	for _, a := range articles {
 		if u := SafeURL(a.URL); u != "" {
 			fmt.Fprintf(&b, "- 《%s》｜摘要：%s｜<%s>\n", Escape(a.Title), Escape(a.Summary), u)
+			if a.Reason != "" {
+				fmt.Fprintf(&b, "> 阅读价值（AI 推论，%s）：%s\n> 摘抄依据：%s\n> 文章依据：%s\n", Escape(a.Relation), Escape(a.Reason), Escape(a.SourceQuote), Escape(a.Quote))
+			}
 		}
 	}
 	if len(articles) == 0 {

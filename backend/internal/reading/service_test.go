@@ -23,6 +23,31 @@ func (s *analyzerStub) AnalyzeContext(_ context.Context, _ string, tags []string
 
 type verifierStub struct{}
 
+type searcherFunc func(context.Context, ArticleQuery) ([]domain.Article, error)
+
+func (f searcherFunc) Search(ctx context.Context, input ArticleQuery) ([]domain.Article, error) {
+	return f(ctx, input)
+}
+
+func TestReadingSearchReceivesCurrentSourceOnlyWhenRequested(t *testing.T) {
+	calls := 0
+	source := "Practice requires feedback and reflection."
+	s := Service{Analyzer: &analyzerStub{result: sample()}, Books: verifierStub{}, Search: searcherFunc(func(_ context.Context, query ArticleQuery) ([]domain.Article, error) {
+		calls++
+		if query.SourceText != source || strings.Join(query.Keywords, ",") != "one,two,three" {
+			t.Fatal("source context or keywords missing")
+		}
+		return []domain.Article{}, nil
+	})}
+	if _, err := s.Generate(context.Background(), Request{Text: source}); err != nil || calls != 0 {
+		t.Fatal("unrequested search executed")
+	}
+	out, err := s.Generate(context.Background(), Request{Text: source, SearchArticles: true})
+	if err != nil || calls != 1 || len(out.Articles) != 0 || len(out.Warnings) != 1 || out.Warnings[0] != "NO_RELEVANT_VERIFIED_ARTICLES" {
+		t.Fatalf("missing empty search feedback: %+v, %v", out.Warnings, err)
+	}
+}
+
 func (verifierStub) Verify(_ context.Context, books []domain.BookCandidate) []domain.BookCandidate {
 	for i := range books {
 		books[i].Verified = books[i].Title != "Missing"

@@ -36,14 +36,29 @@ fun ReadingResults(card: LocalCard, state: MainUiState, vm: MainViewModel) {
         analysis.articles.forEach { article ->
             Text(article.title,style=MaterialTheme.typography.titleMedium)
             Text(article.summary)
+            if (!article.reason.isNullOrBlank()) {
+                Text("${com.clipmind.android.knowledge.relationLabel(article.relation.orEmpty())}视角 · 为什么读", style = MaterialTheme.typography.labelLarge)
+                Text(article.reason)
+                Text("摘抄依据：${article.sourceQuote.orEmpty()}", style = MaterialTheme.typography.bodySmall)
+                Text("文章依据：${article.quote.orEmpty()}", style = MaterialTheme.typography.bodySmall)
+                Text("关联为 AI 推论，请结合全文核对适用条件。", style = MaterialTheme.typography.bodySmall)
+            }
             Text("检查时间：${article.checkedAt}；摘要基于获取到的正文片段，链接以后可能失效。",style=MaterialTheme.typography.bodySmall)
             TextButton({ runCatching { uri.openUri(article.url) } }) { Text("阅读原文") }
         }
-        analysis.warnings.forEach { Text(it,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error) }
+        analysis.warnings.forEach { Text(readingWarning(it),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error) }
     }
     sourceBook?.let { book -> AlertDialog(onDismissRequest={ sourceBook=null },title={ Text("核对《${book.title}》出处") },text={ Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text("只有你已实际核对原书，才能确认。记录页码／章节和与摘抄逐字一致的引文；系统不将模型猜测当作出处。")
         OutlinedTextField(location,{location=it},label={Text("版本、页码或章节")})
         OutlinedTextField(quote,{quote=it},label={Text("已核对原文（20–800字符）")})
     } },confirmButton={ TextButton({ vm.learning.bookSource(card,book.openLibraryKey!!,quote,location); sourceBook=null },enabled=location.isNotBlank() && quote.length in 20..800 && card.content.contains(quote)) { Text("我已核对原书并确认") } },dismissButton={TextButton({sourceBook=null}){Text("取消")}}) }
+}
+
+internal fun readingWarning(code: String): String = when (code) {
+    "NO_RELEVANT_VERIFIED_ARTICLES" -> "未找到有充分原文依据且能拓展当前摘抄的文章，不凑推荐数量。"
+    "ARTICLE_SEARCH_NOT_CONFIGURED" -> "尚未配置文章搜索，未进行外部检索。"
+    "ARTICLE_SEARCH_FAILED" -> "文章检索失败，本次未返回文章。"
+    "NO_VERIFIED_UNREAD_BOOKS" -> "候选书籍未通过真实性或未读校验。"
+    else -> code
 }

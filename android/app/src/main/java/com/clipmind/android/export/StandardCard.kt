@@ -27,5 +27,11 @@ internal fun standardCard(card: LocalCard, links: String): String = buildString 
     append("\n## 延伸阅读\n")
     val articles = analysis?.articles.orEmpty()
     if (articles.isEmpty()) append("暂无经检索和访问校验的文章。\n")
-    articles.forEachIndexed { i,a -> append("${i+1}. 《${escapeMarkdownInline(a.title)}》｜摘要：${escapeMarkdownInline(a.summary)}｜url：${escapeMarkdownInline(a.url)}\n") }
+    articles.forEachIndexed { i,a ->
+        append("${i+1}. 《${escapeMarkdownInline(a.title)}》｜摘要：${escapeMarkdownInline(a.summary)}｜url：${escapeMarkdownInline(a.url)}\n")
+        if (!a.reason.isNullOrBlank()) {
+            append("> 阅读价值（AI 推论，${escapeMarkdownInline(com.clipmind.android.knowledge.relationLabel(a.relation.orEmpty()))}）：${escapeMarkdownInline(a.reason)}\n")
+            append("> 摘抄依据：${escapeMarkdownInline(a.sourceQuote.orEmpty())}\n> 文章依据：${escapeMarkdownInline(a.quote.orEmpty())}\n")
+        }
+    }
 }

@@ -33,6 +33,16 @@ class KnowledgeContractTest {
         assertFalse(KnowledgeContract.safeText("联系电话 13800138000"))
         assertFalse(KnowledgeContract.safeText("password=never-store-this"))
     }
+    @Test fun stanceEvidenceAndPairUniquenessAreEnforcedForV2ButLegacyRemainsReadable() {
+        val relation = KnowledgeRelation("1", "2", "extends", "Different database mechanisms", input.cards[0].text, input.cards[1].text)
+        val valid = result().copy(relations = listOf(relation))
+        assertTrue(KnowledgeContract.validResult(input, valid))
+        assertFalse(KnowledgeContract.validResult(input, valid.copy(relations = listOf(relation, relation.copy(type = "supports")))))
+        assertFalse(KnowledgeContract.validResult(input, valid.copy(relations = listOf(relation, relation.copy(sourceId = "2", targetId = "1", sourceQuote = relation.targetQuote, targetQuote = relation.sourceQuote)))))
+        val fragment = valid.copy(relations = listOf(relation.copy(sourceQuote = "ensure")))
+        assertFalse(KnowledgeContract.validResponse(input, KnowledgeResponse(fragment, "ark", "test", "knowledge-v2")))
+        assertTrue(KnowledgeContract.validResponse(input, KnowledgeResponse(fragment, "ark", "test", "knowledge-v1")))
+    }
     @Test fun markdownIncludesEvidenceAndEscapesModelLinks() {
         val payload = KnowledgeNotePayload(input, KnowledgeResponse(result().copy(title = "[click](bad)"), "ark", "test", "knowledge-v1"))
         val markdown = renderKnowledgeMarkdown(payload, true)

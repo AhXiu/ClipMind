@@ -19,10 +19,21 @@ class SemanticRetrievalTest {
         assertEquals(listOf("4"),rankSemantic(cards,1,"new",cache,emptySet()).map { it.card.id })
         assertTrue(runCatching { rankSemantic(cards,1,"old",cache,emptySet()) }.isFailure)
     }
-    @Test fun oppositeVectorsRankLastAndDimensionsAreGuarded() {
+    @Test fun oppositeVectorsAreNotMistakenForOpposingViewsAndDimensionsAreGuarded() {
         val cards=(1L..3).map { KnowledgeCard(it.toString(),1,"same words") }
         val cache=listOf(IndexedVector(1,1,"m",vector),IndexedVector(2,1,"m",vector.map { -it }),IndexedVector(3,1,"m",vector))
-        assertEquals(listOf("3","2"),rankSemantic(cards,1,"m",cache,emptySet()).map { it.card.id })
+        assertEquals(listOf("3"),rankSemantic(cards,1,"m",cache,emptySet()).map { it.card.id })
         assertTrue(runCatching { rankSemantic(cards,1,"m",cache.map { if(it.cardId==3L) it.copy(values=vector+0.0) else it },emptySet()) }.isFailure)
+    }
+    @Test fun diverseCandidateCanDisplaceNearDuplicatesWithoutExtraCalls() {
+        val cards = (1L..8).map { KnowledgeCard(it.toString(), 1, "source $it") }
+        val cache = cards.map {
+            IndexedVector(it.id.toLong(), 1, "m", if (it.id == "8") listOf(0.9, -0.435889894, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                else if (it.id == "1") vector else listOf(0.95, 0.3122499, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+        }
+        val found = rankSemantic(cards, 1, "m", cache, emptySet())
+        assertEquals(5, found.size)
+        assertEquals(listOf("2", "3", "8"), found.take(3).map { it.card.id })
+        assertEquals(found, rankSemantic(cards.reversed(), 1, "m", cache.reversed(), emptySet()))
     }
 }

@@ -21,11 +21,28 @@ fun rankSemantic(cards: List<KnowledgeCard>, sourceId: Long, model: String, vect
     val sourceCard = cards.firstOrNull { it.id.toLong() == sourceId } ?: throw KnowledgeFailure("SOURCE_CHANGED")
     val rows = vectors.filter { it.model == model }.associateBy { it.cardId }
     val source = rows[sourceId]?.takeIf { it.revision == sourceCard.revision }?.values ?: throw KnowledgeFailure("SOURCE_VECTOR_MISSING")
-    return cards.filter { it.id.toLong() != sourceId && it.id.toLong() !in excluded }.mapNotNull { card ->
+    val candidates = cards.filter { it.id.toLong() != sourceId && it.id.toLong() !in excluded }.mapNotNull { card ->
         val row = rows[card.id.toLong()]?.takeIf { it.revision == card.revision } ?: return@mapNotNull null
         if (source.size != row.values.size) throw KnowledgeFailure("INDEX_DIMENSION_CHANGED")
         SemanticMatch(card,VectorMath.cosine(source,row.values))
-    }.sortedWith(compareByDescending<SemanticMatch> { it.score }.thenBy { it.card.id.toLong() }).take(5)
+    }.filter { it.score > 0.0 }
+        .sortedWith(compareByDescending<SemanticMatch> { it.score }.thenBy { it.card.id.toLong() }).take(20).toMutableList()
+    // Preserve the closest two, then prefer complementary candidates within the
+    // semantic shortlist. Neither cosine nor diversity determines viewpoint polarity.
+    val selected = candidates.take(2).toMutableList()
+    candidates.removeAll(selected.toSet())
+    while (selected.size < 5 && candidates.isNotEmpty()) {
+        fun utility(match: SemanticMatch): Double {
+            val vector = rows.getValue(match.card.id.toLong()).values
+            val redundancy = selected.maxOf { VectorMath.cosine(vector, rows.getValue(it.card.id.toLong()).values) }
+            return 0.7 * match.score - 0.3 * redundancy
+        }
+        val next = candidates.sortedWith(compareByDescending<SemanticMatch> { utility(it) }
+            .thenByDescending { it.score }.thenBy { it.card.id.toLong() }).first()
+        selected += next
+        candidates.remove(next)
+    }
+    return selected
 }
 
 object VectorMath {

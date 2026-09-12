@@ -18,3 +18,13 @@ func TestFullTemplatePreservesRawAndDoesNotInventReferences(t *testing.T) {
 		t.Fatal("unverified book rendered")
 	}
 }
+
+func TestArticleEvidenceIsExportedAndEscaped(t *testing.T) {
+	article := domain.Article{Title: "Article", URL: "https://sspai.com/post/1", Summary: "Summary", Relation: "extends", Reason: "[unsafe](link)", SourceQuote: "Original source evidence.", Quote: "Article evidence with context."}
+	markdown := FullMarkdown("1", "2026-09-13", "Original", "", "", "", domain.Interpretation{}, nil, nil, []domain.Article{article})
+	for _, expected := range []string{"\\[unsafe\\]", article.SourceQuote, article.Quote} {
+		if !strings.Contains(markdown, expected) {
+			t.Fatalf("missing escaped evidence: %s", expected)
+		}
+	}
+}

@@ -42,21 +42,22 @@ func TestArticleSearchUsesFetchedTextAndRejectsUngroundedSummaries(t *testing.T)
 			})}, Summarizer: completerFunc(func(_ context.Context, _, user string) (string, error) {
 				summaries++
 				var payload map[string]string
-				if json.Unmarshal([]byte(user), &payload) != nil || !strings.Contains(payload["text"], quote) || strings.Contains(payload["text"], "secret script") {
+				if json.Unmarshal([]byte(user), &payload) != nil || !strings.Contains(payload["text"], quote) || strings.Contains(payload["text"], "secret script") || payload["source_text"] != "Practice requires feedback." {
 					t.Fatal("summary must use sanitized fetched body")
 				}
 				proof := quote
 				if !valid {
 					proof = "An invented quotation that is absent from the fetched article."
 				}
-				body, _ := json.Marshal(map[string]any{"summary": "Deliberate practice", "quote": proof, "is_article": true})
+				body, _ := json.Marshal(map[string]any{"summary": "Deliberate practice", "quote": proof, "is_article": true,
+					"source_quote": "Practice requires feedback.", "relation": "extends", "reason": "Explains how feedback changes practice."})
 				return string(body), nil
 			})}
-			articles, err := search.Search(context.Background(), []string{"practice", "learning", "feedback"})
+			articles, err := search.Search(context.Background(), ArticleQuery{SourceText: "Practice requires feedback.", Keywords: []string{"practice", "learning", "feedback"}})
 			if err != nil || fetches != 2 || summaries != 1 {
 				t.Fatalf("unexpected pipeline: %v/%d/%d", err, fetches, summaries)
 			}
-			if valid && (len(articles) != 1 || articles[0].URL != "https://sspai.com/post/1" || articles[0].CheckedAt == "") {
+			if valid && (len(articles) != 1 || articles[0].URL != "https://sspai.com/post/1" || articles[0].CheckedAt == "" || articles[0].Quote != quote || articles[0].Reason == "") {
 				t.Fatal("verified article missing")
 			}
 			if !valid && len(articles) != 0 {

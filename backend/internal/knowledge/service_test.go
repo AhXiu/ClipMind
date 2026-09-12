@@ -35,6 +35,18 @@ func TestContractRejectsUnverifiableClaims(t *testing.T) {
 		{"unknown type", func(r *Result) { r.Relations[0].Type = "causes" }},
 		{"wrong relation quote", func(r *Result) { r.Relations[0].TargetQuote = "Database transactions" }},
 		{"duplicate relation", func(r *Result) { r.Relations = append(r.Relations, r.Relations[0]) }},
+		{"conflicting classification", func(r *Result) {
+			other := r.Relations[0]
+			other.Type = "extends"
+			r.Relations = append(r.Relations, other)
+		}},
+		{"reverse duplicate", func(r *Result) {
+			other := r.Relations[0]
+			other.SourceID, other.TargetID = other.TargetID, other.SourceID
+			other.SourceQuote, other.TargetQuote = other.TargetQuote, other.SourceQuote
+			r.Relations = append(r.Relations, other)
+		}},
+		{"fragment stance evidence", func(r *Result) { r.Relations[0].Type = "supports"; r.Relations[0].SourceQuote = "Database" }},
 		{"missing relations", func(r *Result) { r.Relations = nil }},
 	}
 	for _, tc := range cases {
@@ -45,6 +57,20 @@ func TestContractRejectsUnverifiableClaims(t *testing.T) {
 				t.Fatal("invalid result accepted")
 			}
 		})
+	}
+}
+
+func TestClaimEvidenceSupportsShortAndUnicodeSources(t *testing.T) {
+	for _, text := range []string{"Less is more", "少即是多", strings.Repeat("界", 12)} {
+		if !ClaimQuoteValid(text, text, 400) {
+			t.Fatal("complete claim rejected")
+		}
+		if ClaimQuoteValid(text, string([]rune(text)[:2]), 400) {
+			t.Fatal("fragment accepted")
+		}
+	}
+	if ClaimQuoteValid("a            b", "a            ", 400) {
+		t.Fatal("padding accepted as context")
 	}
 }
 

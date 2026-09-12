@@ -25,7 +25,7 @@ data class ReviewEntity(@PrimaryKey val cardId: Long, val revision: Long, val du
 
 object ReadingContract {
     val PRIMARY = setOf("人文", "商业", "技术", "认知", "职场", "社会", "随笔")
-    fun valid(a: ClientAnalysis): Boolean = runCatching {
+    fun valid(a: ClientAnalysis, sourceText: String? = null): Boolean = runCatching {
         require(a.schemaVersion == 2 && a.primaryTag in PRIMARY && a.provider.isNotBlank() && a.model.isNotBlank())
         require(listOf(a.interpretation.summary, a.interpretation.insight, a.interpretation.action).all { it.isNotBlank() && it.length <= 8000 })
         require(a.secondaryTags.size <= 5 && a.secondaryTags.all { it.name.isNotBlank() && it.name.length <= 60 && it.name !in PRIMARY && it.status in setOf("reused", "pending") })
@@ -33,6 +33,19 @@ object ReadingContract {
         require(a.questions.size <= 3 && (a.value != "high" || a.questions.size >= 2) && a.questions.all { it.isNotBlank() && it.length <= 400 })
         require(a.books.size <= 3 && a.books.all { it.title.isNotBlank() && it.title.length <= 600 && it.author.length <= 400 && it.reason.length <= 600 && it.verified && it.openLibraryKey?.matches(Regex("/works/OL[0-9]+W")) == true && it.confidence in setOf("semantic", "speculative") })
         require(a.articles.size <= 3 && a.articles.all { validArticleUrl(it.url) && it.title.isNotBlank() && it.title.length <= 600 && it.summary.isNotBlank() && it.summary.length <= 400 && it.checkedAt.isNotBlank() })
+        require(a.articles.map { it.url }.distinct().size == a.articles.size)
+        a.articles.forEach { article ->
+            val enriched = listOf(article.relation, article.reason, article.quote, article.sourceQuote).any { it != null }
+            if (enriched) {
+                require(article.relation in setOf("supports", "contradicts", "extends", "example"))
+                require(!article.reason.isNullOrBlank() && article.reason.codePointCount(0, article.reason.length) <= 200)
+                require(!article.quote.isNullOrBlank() && article.quote.trim().let { it.codePointCount(0, it.length) } in 20..200)
+                require(!article.sourceQuote.isNullOrBlank() && article.sourceQuote.codePointCount(0, article.sourceQuote.length) <= 200)
+                if (sourceText != null) {
+                    require(KnowledgeContract.claimQuoteValid(sourceText, article.sourceQuote, 200))
+                }
+            }
+        }
         true
     }.getOrDefault(false)
     fun validArticleUrl(url: String): Boolean = runCatching {

@@ -16,7 +16,11 @@ type Analyzer interface {
 	AnalyzeContext(context.Context, string, []string) (llm.Result, error)
 }
 type Searcher interface {
-	Search(context.Context, []string) ([]domain.Article, error)
+	Search(context.Context, ArticleQuery) ([]domain.Article, error)
+}
+type ArticleQuery struct {
+	SourceText string
+	Keywords   []string
 }
 type Request struct {
 	Text           string   `json:"text"`
@@ -157,11 +161,14 @@ func (s *Service) Generate(ctx context.Context, input Request) (Response, error)
 		if s.Search == nil {
 			out.Warnings = append(out.Warnings, "ARTICLE_SEARCH_NOT_CONFIGURED")
 		} else {
-			articles, e := s.Search.Search(ctx, r.Keywords)
+			articles, e := s.Search.Search(ctx, ArticleQuery{SourceText: input.Text, Keywords: r.Keywords})
 			if e != nil {
 				out.Warnings = append(out.Warnings, "ARTICLE_SEARCH_FAILED")
 			} else {
 				out.Articles = articles
+				if len(articles) == 0 {
+					out.Warnings = append(out.Warnings, "NO_RELEVANT_VERIFIED_ARTICLES")
+				}
 			}
 		}
 	}

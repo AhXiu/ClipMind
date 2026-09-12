@@ -32,10 +32,10 @@ fun LearningDialogs(state: MainUiState, vm: MainViewModel) {
                     item { Text("完整分析使用配置的后端模型（不是设备 BYOK）。发送下列原文、已确认二级标签和已读书名；标签池参与优先复用，书名用于过滤。可能产生费用。") }
                     item { Text("卡片 ${preview.plan.card.id} · v${preview.plan.card.contentRevision}\n${preview.plan.request.text}") }
                     item { Text("标签池：${preview.plan.request.knownTags.joinToString("、")}\n已读书：${preview.plan.request.readBooks.joinToString("、")}") }
-                    item { Text(if (preview.plan.request.searchArticles) "另将3个主题关键词发给 Brave Search，访问白名单文章，正文片段交给后端模型摘要。无配置时明确提示，不生成链接。" else "不调用外部文章搜索。候选书名将经 OpenLibrary 校验。") }
+                    item { Text(if (preview.plan.request.searchArticles) "另将3个主题关键词发给 Brave Search，访问白名单文章；正文片段与当前摘抄交给同一后端模型判断阅读价值并摘要，最多校验8篇、返回3篇。保留双方引文，关联需人工核对。无配置时明确提示，不生成链接。" else "不调用外部文章搜索。候选书名将经 OpenLibrary 校验。") }
                 }
                 is LearningPreview.Semantic -> {
-                    item { Text("真实语义检索：${preview.plan.model}。以下 ${preview.plan.pending.size} 张需更新向量，将经后端发送给 OpenAI；向量加密保存在本机。全库 ${preview.plan.cards.size} 张参与本地 Top-5 检索。") }
+                    item { Text("真实语义检索：${preview.plan.model}。以下 ${preview.plan.pending.size} 张需更新向量，将经后端发送给 OpenAI；向量加密保存在本机。全库 ${preview.plan.cards.size} 张参与本地召回，从最近20张中兼顾相关性和多样性选出最多5张。相似度不代表立场，对立关系必须有可比命题和双方证据。") }
                     item { Text("随后将源卡片与最多5张召回卡片的全文分5次交给当前配置的 LLM（${state.aiMode}）判断，可能产生费用；不自动确认关联。下面是本次可参与判断的完整范围。") }
                     items(preview.plan.cards, key = { it.id }) { Text("卡片 ${it.id} · v${it.revision}\n${it.text}") }
                 }

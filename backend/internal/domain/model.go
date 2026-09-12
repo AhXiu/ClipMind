@@ -109,10 +109,14 @@ type TagSuggestion struct {
 }
 
 type Article struct {
-	Title     string `json:"title"`
-	URL       string `json:"url"`
-	Summary   string `json:"summary"`
-	CheckedAt string `json:"checked_at"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	Summary     string `json:"summary"`
+	CheckedAt   string `json:"checked_at"`
+	Relation    string `json:"relation,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Quote       string `json:"quote,omitempty"`
+	SourceQuote string `json:"source_quote,omitempty"`
 }
 
 type ClientBook struct {

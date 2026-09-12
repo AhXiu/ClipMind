@@ -33,6 +33,14 @@ class StandardCardTest {
         assertTrue(output.contains("{{tags}}"))
         assertTrue(output.endsWith("RELATION\n"))
     }
+    @Test fun articleReadingValueAndEvidenceSurviveExportWithEscaping() {
+        val article = ReadingArticle("Article", "https://sspai.com/post/1", "Summary", "today", "extends", "[unsafe](link)", "Article evidence with context.", "Original source evidence.")
+        val rendered = standardCard(card.copy(analysis = analysis.copy(articles = listOf(article))), "")
+        assertTrue(rendered.contains("阅读价值（AI 推论，补充）"))
+        assertTrue(rendered.contains("\\[unsafe\\]"))
+        assertTrue(rendered.contains("摘抄依据：Original source evidence."))
+        assertTrue(rendered.contains("文章依据：Article evidence with context."))
+    }
 
     @Test fun zipIncludesIndependentRawAndWeeklyDocuments() {
         val documents = listOf(MarkdownFile("raw/capture.json", "{\"text\":\"original\"}"), MarkdownFile("reflections/weekly.md", "# Weekly"))

@@ -47,7 +47,7 @@ paths:
   /v1/reading:embed:
     post:
       summary: 生成用于端侧索引的真实语义向量
-      description: 固定调用 OpenAI embeddings；每批 1–16 条，总共最多 16000 个 Unicode 字符。客户端按模型和原文修订缓存，余弦 Top-5 在本地执行。本接口不保存向量库。
+      description: 固定调用 OpenAI embeddings；每批 1–16 条，总共最多 16000 个 Unicode 字符。客户端按模型和原文修订缓存，本地余弦 Top-20 中保留最近两条再多样性重排至最多5条；非正相似度不用于推断对立。本接口不保存向量库。
       requestBody:
         required: true
         content:
@@ -365,6 +365,10 @@ components:
               url: { type: string, format: uri, description: 白名单 HTTPS 实际访问成功，不保证未来永久可达 }
               summary: { type: string, minLength: 1, maxLength: 200 }
               checked_at: { type: string, format: date-time }
+              relation: { type: string, enum: [supports, contradicts, extends, example], description: 新结果中为文章对摘抄的关系；旧缓存可缺省，均为待核对推论 }
+              reason: { type: string, minLength: 1, maxLength: 200, description: 具体阅读增量与比较边界，与其他增强字段同时出现 }
+              quote: { type: string, minLength: 20, maxLength: 200, description: 服务端校验过的连续文章正文引文 }
+              source_quote: { type: string, minLength: 1, maxLength: 200, description: 对应摘抄的连续原文，至少12字或不足12字时全文 }
         value: { type: string, enum: [high, medium, low] }
         value_reason: { type: string }
         questions: { type: array, maxItems: 3, description: high 时至少两题, items: { type: string, minLength: 1, maxLength: 200 } }
@@ -413,6 +417,7 @@ components:
         quote: { type: string, minLength: 1, maxLength: 400, description: 必须是对应卡片的连续原文 }
     KnowledgeRelation:
       type: object
+      description: v2中每个无序卡片对最多一条关系；非same_topic双方引文至少12字，原文不足12字时引用全文。语义及适用边界仍需人工核对。
       additionalProperties: false
       required: [source_id, target_id, type, reason, source_quote, target_quote]
       properties:
@@ -428,7 +433,7 @@ components:
       properties:
         provider: { type: string, enum: [ark, openrouter, kimi, glm, openai, deterministic] }
         model: { type: string }
-        prompt_version: { type: string, enum: [knowledge-v1] }
+        prompt_version: { type: string, enum: [knowledge-v1, knowledge-v2], description: 新服务端与BYOK输出v2；新客户端兼容读取v1历史结果 }
         result:
           type: object
           additionalProperties: false

@@ -42,7 +42,7 @@ class ReadingRepository(private val db: ClipMindDatabase, private val cards: Loc
         val response = api.analyzeReading(authorization, plan.request)
         val result = response.body()
         if (!response.isSuccessful || result == null) throw KnowledgeFailure("READING_HTTP_${response.code()}")
-        if (!ReadingContract.valid(result)) throw KnowledgeFailure("INVALID_READING_RESULT")
+        if (!ReadingContract.valid(result, plan.card.content)) throw KnowledgeFailure("INVALID_READING_RESULT")
         val encrypted = cipher.encrypt(gson.toJson(result))
         db.withTransaction {
             if (!allowed() || !current(plan)) throw KnowledgeFailure("SOURCE_OR_CONSENT_CHANGED")
