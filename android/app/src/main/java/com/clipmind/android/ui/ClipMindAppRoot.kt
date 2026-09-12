@@ -5,8 +5,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +26,7 @@ fun ClipMindAppRoot(
 ) {
     var tab by rememberSaveable { mutableStateOf(AppTab.LIBRARY) }
     var secondary by rememberSaveable { mutableStateOf<AppTab?>(null) }
+    var composerPosition by rememberMovableDialogPosition()
     val screen = secondary ?: tab
     val libraryScroll = rememberLazyListState()
     LaunchedEffect(state.reviewNavigation) { if (state.reviewNavigation > 0) { tab = AppTab.REVIEW; secondary = null } }
@@ -107,15 +106,22 @@ fun ClipMindAppRoot(
             AppTab.STATUS -> AiWorkbenchScreen(state, vm, padding, onExport)
         }
     }
-    if (state.composerOpen) AlertDialog(onDismissRequest = vm::closeComposer, title = { Text("记录一张卡片") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    if (state.composerOpen) MovableDialog(
+        title = "记录一张卡片",
+        position = composerPosition,
+        onPositionChange = { composerPosition = it },
+        onDismissRequest = vm::closeComposer,
+        confirmButton = { TextButton({ vm.addManualText(state.manualDraft, vm::closeComposer) }, enabled = state.manualDraft.isNotBlank() && !state.savingDraft) { Text(if (state.savingDraft) "保存中" else "保存卡片") } },
+        dismissButton = { TextButton(vm::closeComposer) { Text("稍后继续") } },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             DraftRecoveryNotice(state, vm, "manual")
             OutlinedTextField(state.manualDraft, vm::setManualDraft, Modifier.fillMaxWidth().heightIn(max = 260.dp), minLines = 4, label = { Text(if (state.learning.draftsLoaded) "输入或长按粘贴内容" else "正在恢复加密草稿") }, enabled = state.learning.draftsLoaded && "manual" !in state.learning.unreadableDrafts)
             Text(state.learning.draftStatus["manual"] ?: "先保存到本机，不需要 AI 或采集权限。", style = MaterialTheme.typography.bodySmall)
             TextButton(onVoiceInput) { Text("语音输入") }
             Text("语音由系统识别服务处理，可能联网。", style = MaterialTheme.typography.bodySmall)
         }
-    }, confirmButton = { TextButton({ vm.addManualText(state.manualDraft, vm::closeComposer) }, enabled = state.manualDraft.isNotBlank() && !state.savingDraft) { Text(if (state.savingDraft) "保存中" else "保存卡片") } }, dismissButton = { TextButton(vm::closeComposer) { Text("稍后继续") } })
+    }
     if (confirmLeave) AlertDialog(
         onDismissRequest = { confirmLeave = false },
         title = { Text("放弃未保存的修改？") },

@@ -64,7 +64,7 @@ Manifest 仅声明联网、通知和前台服务（含 Android 14 `specialUse` �
 
 ## 测试
 
-AI 服务设置提供服务商与模型搜索下拉框，支持 Kimi、GLM、OpenAI 官方 Key 及 Ark/OpenRouter。旧版共用 Key 不自动推断归属，升级后需确认迁移或重新输入。支持范围、会员区别、模型目录和人工渐进启用流程见 [LLM 接入说明](../docs/llm-providers.md)。
+AI 服务设置支持 Kimi、GLM、OpenAI GPT、Claude/Anthropic、Gemini、DeepSeek、Qwen（新加坡）官方 Key 及 Ark/OpenRouter。选择服务商并保存 Key、确认授权后从该服务商获取实时模型列表，支持搜索与自定义 ID；Ark 部署 ID 与尚未接入目录 API 的 GLM 仍需手动填写。Claude Code / Codex 订阅登录凭证不是这里的通用 API Key。旧版共用 Key 不自动推断归属，升级后需确认迁移或重新输入。支持范围、区域限制、会员区别、模型目录和人工渐进启用流程见 [LLM 接入说明](../docs/llm-providers.md)。
 
 当前导航为「卡片 / 主题 / 回顾」，默认打开卡片库；统一 + 记录，设置与处理状态位于右上角。主题支持手动分组和个人笔记，详情优先展示原文与想法。新安装默认关闭 AI 与自动提交，已有配置保持不变；提醒、自动分析、自动关联和自动周报均按明确授权启用。完整落地范围、验收与人工渐进启用流程见 [安卓体验优化](../docs/android-friendly-ux.md)，阅读能力边界见 [阅读闭环说明](../docs/reading-loop.md)。
 

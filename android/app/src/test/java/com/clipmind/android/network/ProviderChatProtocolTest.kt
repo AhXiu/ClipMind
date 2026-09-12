@@ -22,13 +22,13 @@ class ProviderChatProtocolTest {
     @Test fun protocolUsesOnlyOfficialEndpointsAndKeepsKeysOutOfJson() {
         AiDefaults.providerIds.forEach { provider ->
             val request = ProviderChatProtocol.request(provider, "test-model", "provider-test-key", messages)
-            assertEquals("${AiDefaults.endpoint(provider)}/chat/completions", request.url.toString())
+            assertEquals(ProviderChatProtocol.generationEndpoint(provider, "test-model"), request.url.toString())
             assertEquals("https", request.url.scheme)
-            assertEquals("Bearer provider-test-key", request.header("Authorization"))
+            assertEquals(providerKeyValue(provider, "provider-test-key"), request.header(providerKeyHeader(provider)))
             val body = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
             assertFalse(body.contains("provider-test-key"))
             val json = JsonParser.parseString(body).asJsonObject
-            assertEquals("json_object", json.getAsJsonObject("response_format").get("type").asString)
+            if (provider !in setOf("anthropic", "gemini")) assertEquals("json_object", json.getAsJsonObject("response_format").get("type").asString)
             if (provider != "ark") assertFalse(json.has("temperature"))
         }
         listOf("unknown", "https://attacker.invalid").forEach { provider ->
@@ -55,9 +55,9 @@ class ProviderChatProtocolTest {
             var calls = 0
             val http = OkHttpClient.Builder().addInterceptor { chain ->
                 calls++
-                assertEquals("Bearer $provider-test-key", chain.request().header("Authorization"))
+                assertEquals(providerKeyValue(provider, "$provider-test-key"), chain.request().header(providerKeyHeader(provider)))
                 Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                    .body(envelope().toResponseBody()).build()
+                    .body(providerEnvelope(provider, content).toResponseBody()).build()
             }.build()
             val result = FixedProviderClient(http).analyze(provider, "test-model", "$provider-test-key", "test excerpt")
             assertTrue(result is ByokAnalysisResult.Success)
@@ -67,8 +67,8 @@ class ProviderChatProtocolTest {
     }
 
     @Test fun errorCategoriesNeverExposeProviderErrorBodiesOrRetry() = runBlocking {
-        mapOf(401 to ByokErrorCode.BYOK_AUTH, 403 to ByokErrorCode.BYOK_AUTH,
-            402 to ByokErrorCode.BYOK_QUOTA, 404 to ByokErrorCode.BYOK_MODEL_UNAVAILABLE,
+        mapOf(401 to ByokErrorCode.BYOK_AUTH, 403 to ByokErrorCode.BYOK_PERMISSION,
+            402 to ByokErrorCode.BYOK_QUOTA, 404 to ByokErrorCode.BYOK_NOT_FOUND,
             429 to ByokErrorCode.BYOK_RATE_LIMIT, 400 to ByokErrorCode.BYOK_VALIDATION,
             500 to ByokErrorCode.BYOK_HTTP, 307 to ByokErrorCode.BYOK_HTTP).forEach { (status, code) ->
             var calls = 0
@@ -78,7 +78,7 @@ class ProviderChatProtocolTest {
                     .header("Location", "https://attacker.invalid").body("secret-provider-error".toResponseBody()).build()
             }.build()
             val result = FixedProviderClient(http).analyze("kimi", "kimi-k3", "test-key", "excerpt")
-            assertEquals(ByokAnalysisResult.Failure(code), result)
+            assertEquals(ByokAnalysisResult.Failure(code, status), result)
             assertEquals(1, calls)
             assertFalse(result.toString().contains("secret-provider-error"))
         }

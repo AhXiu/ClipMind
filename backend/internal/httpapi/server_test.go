@@ -131,7 +131,7 @@ func TestBatchAPIClientAnalysisValidationAndNoClientKey(t *testing.T) {
 	if rr.Code != http.StatusBadRequest || strings.Contains(rr.Body.String(), "must-not-enter-backend") {
 		t.Fatalf("client key field was not safely rejected: status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	for _, provider := range []string{"ark", "openrouter", "kimi", "glm", "openai"} {
+	for _, provider := range []string{"ark", "openrouter", "kimi", "glm", "openai", "anthropic", "gemini", "deepseek", "qwen"} {
 		body := fmt.Sprintf(`{"captures":[{"client_capture_id":%q,"raw_text":"safe","mode":"confirm","client_analysis":{"provider":%q,"model":"test-model","primary_tag":"技术","interpretation":{"summary":"s","insight":"i","action":"a"},"books":[]}}]}`, "client-"+provider, provider)
 		req = httptest.NewRequest(http.MethodPost, "/v1/captures:batch", strings.NewReader(body))
 		req.Header.Set("Idempotency-Key", "provider-"+provider)

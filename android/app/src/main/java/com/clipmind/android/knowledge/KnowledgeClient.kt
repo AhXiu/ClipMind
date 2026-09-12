@@ -5,7 +5,6 @@ import com.clipmind.android.network.CaptureApi
 import com.clipmind.android.network.ProviderChatProtocol
 import com.clipmind.android.network.awaitProviderResponse
 import com.google.gson.Gson
-import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -49,7 +48,7 @@ class KnowledgeClient(private val api: CaptureApi, httpClient: OkHttpClient = Ok
                     if (source.buffer.size > 1_048_576) throw KnowledgeFailure("RESULT_TOO_LARGE")
                     source.readUtf8()
                 }
-                val result = parseProviderResult(raw)
+                val result = parseProviderResult(raw, config.mode.providerId)
                 KnowledgeResponse(result, config.mode.providerId, config.model, KnowledgeContract.PROMPT_VERSION)
             }
         }
@@ -57,12 +56,8 @@ class KnowledgeClient(private val api: CaptureApi, httpClient: OkHttpClient = Ok
         return response
     }
 
-    internal fun parseProviderResult(raw: String): KnowledgeResult = try {
-        val choices = JsonParser.parseString(raw).asJsonObject.getAsJsonArray("choices")
-        if (choices.size() != 1) throw KnowledgeFailure("INVALID_RESULT")
-        val finish = choices[0].asJsonObject.get("finish_reason")
-        if (finish != null && !finish.isJsonNull && finish.asString != "stop") throw KnowledgeFailure("INVALID_RESULT")
-        val content = choices[0].asJsonObject.getAsJsonObject("message").get("content").asString
-        gson.fromJson(content, KnowledgeResult::class.java)
+    internal fun parseProviderResult(raw: String, provider: String = "openrouter"): KnowledgeResult = try {
+        val content = ProviderChatProtocol.jsonContent(provider, raw)
+        gson.fromJson(content, KnowledgeResult::class.java) ?: throw KnowledgeFailure("INVALID_RESULT")
     } catch (_: Exception) { throw KnowledgeFailure("INVALID_RESULT") }
 }

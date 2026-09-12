@@ -24,13 +24,15 @@ enum class ByokErrorCode {
     BYOK_JSON,
     BYOK_VALIDATION,
     BYOK_MODEL_UNAVAILABLE,
+    BYOK_NOT_FOUND,
+    BYOK_PERMISSION,
     BYOK_RATE_LIMIT,
     BYOK_QUOTA,
 }
 
 sealed interface ByokAnalysisResult {
     data class Success(val analysis: ClientAnalysis) : ByokAnalysisResult
-    data class Failure(val code: ByokErrorCode) : ByokAnalysisResult
+    data class Failure(val code: ByokErrorCode, val httpStatus: Int? = null) : ByokAnalysisResult
 }
 
 interface ClientAnalyzer {
@@ -68,16 +70,7 @@ class FixedProviderClient(
         )
         try {
             client.newCall(request).awaitProviderResponse().use { response ->
-                if (!response.isSuccessful) return@withContext ByokAnalysisResult.Failure(
-                    when (response.code) {
-                        401, 403 -> ByokErrorCode.BYOK_AUTH
-                        402 -> ByokErrorCode.BYOK_QUOTA
-                        404 -> ByokErrorCode.BYOK_MODEL_UNAVAILABLE
-                        429 -> ByokErrorCode.BYOK_RATE_LIMIT
-                        400, 422 -> ByokErrorCode.BYOK_VALIDATION
-                        else -> ByokErrorCode.BYOK_HTTP
-                    },
-                )
+                if (!response.isSuccessful) return@withContext providerHttpError(response)
                 val responseBody = response.body
                     ?: return@withContext ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
                 if (responseBody.contentLength() > MAX_RESPONSE_BYTES) {
@@ -101,19 +94,17 @@ class FixedProviderClient(
 
     internal fun parseResponse(raw: String, provider: String, model: String): ByokAnalysisResult {
         val providerResult = try {
-            val root = com.google.gson.JsonParser.parseString(raw).asJsonObject
-            val choices = root.getAsJsonArray("choices")
-            if (choices == null || choices.size() != 1) return ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
-            val finish = choices[0].asJsonObject.get("finish_reason")
-            if (finish != null && !finish.isJsonNull && finish.asString != "stop") return invalid()
-            val content = choices[0].asJsonObject.getAsJsonObject("message")?.get("content")?.asString
-                ?: return ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
+            val content = ProviderChatProtocol.jsonContent(provider, raw)
             gson.fromJson(content, ProviderAnalysis::class.java) ?: return invalid()
+        } catch (_: IncompleteProviderOutput) {
+            return invalid()
         } catch (_: JsonParseException) {
             return ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
         } catch (_: IllegalStateException) {
             return ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
         } catch (_: UnsupportedOperationException) {
+            return ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
+        } catch (_: RuntimeException) {
             return ByokAnalysisResult.Failure(ByokErrorCode.BYOK_JSON)
         }
         return validate(providerResult, provider, model)

@@ -131,7 +131,7 @@ type ClientAnalysis struct {
 
 func ValidateClientAnalysis(a ClientAnalysis) error {
 	switch a.Provider {
-	case "ark", "openrouter", "kimi", "glm", "openai":
+	case "ark", "openrouter", "kimi", "glm", "openai", "anthropic", "gemini", "deepseek", "qwen":
 	default:
 		return errors.New("client_analysis.provider is unsupported")
 	}

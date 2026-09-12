@@ -4,29 +4,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AiModelCatalogTest {
-    @Test fun compactPickerPrioritizesCurrentAndRecentWithoutRemovingFullCatalogue() {
-        val compact = AiModelCatalog.common("openrouter", "private/current-model", listOf("private/recent-model", "private/current-model"))
-        assertEquals(listOf("private/current-model", "private/recent-model"), compact.take(2))
-        assertTrue(compact.size < 15)
-        assertTrue(AiModelCatalog.models("openrouter").size > 100)
-        assertTrue(AiModelCatalog.search(AiModelCatalog.models("openrouter"), "deepseek").isNotEmpty())
-    }
-    @Test fun routerCatalogCoversMainstreamFamiliesWithoutBatchOrInvalidIds() {
-        val models = AiModelCatalog.models("openrouter")
-        listOf("openai/", "anthropic/", "google/", "moonshotai/", "z-ai/", "deepseek/", "qwen/").forEach { family ->
-            assertTrue(family, models.any { it.startsWith(family) })
-        }
-        assertEquals(models.size, models.distinct().size)
-        assertTrue(models.all { AiDefaults.validModel(it) && !it.contains(":batch") })
+    @Test fun ordersOnlyLiveModelsWithoutReintroducingRetiredOrOtherProviderModels() {
+        val live = listOf("kimi-new", "kimi-current", "kimi-recent", "kimi-new")
+        assertEquals(listOf("kimi-current", "kimi-recent", "kimi-new"),
+            AiModelCatalog.ordered(live, "kimi-current", listOf("kimi-retired", "kimi-recent", "gpt-other-provider")))
+        assertTrue(AiModelCatalog.ordered(emptyList(), "kimi-current", listOf("kimi-recent")).isEmpty())
     }
 
-    @Test fun directProviderModelsAndCustomValuesDoNotMix() {
-        assertTrue(AiModelCatalog.models("kimi").all { it.startsWith("kimi-") })
-        assertTrue(AiModelCatalog.models("glm").all { it.startsWith("glm-") })
-        assertTrue(AiModelCatalog.models("openai").all { it.startsWith("gpt-") })
-        assertTrue(AiModelCatalog.options("kimi", "custom-model").contains("custom-model"))
-        assertTrue(AiModelCatalog.models("unknown").isEmpty())
-        assertTrue(AiModelCatalog.models("ark").isEmpty())
-        assertEquals(listOf("kimi-k3"), AiModelCatalog.search(AiModelCatalog.models("kimi"), " KIMI-K3 "))
+    @Test fun searchesTheLiveResponseIgnoringCaseAndSurroundingSpaces() {
+        assertEquals(listOf("kimi-k3"), AiModelCatalog.search(listOf("kimi-k3", "kimi-k2.6"), " KIMI-K3 "))
+    }
+
+    @Test fun newProvidersHaveNoGuessedDefaultModel() {
+        listOf("anthropic", "gemini", "deepseek", "qwen").forEach {
+            assertEquals("", AiDefaults.defaultModel(it))
+            assertNotNull(AiDefaults.endpoint(it))
+            assertNotNull(AiDefaults.modelsEndpoint(it))
+        }
+        assertNull(AiDefaults.modelsEndpoint("ark"))
+        assertNull(AiDefaults.modelsEndpoint("glm"))
+        assertNull(AiDefaults.modelsEndpoint("unknown"))
     }
 }

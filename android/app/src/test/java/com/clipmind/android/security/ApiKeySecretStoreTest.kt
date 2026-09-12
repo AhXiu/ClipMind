@@ -1,6 +1,7 @@
 package com.clipmind.android.security
 
 import android.content.SharedPreferences
+import com.clipmind.android.data.AiDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -9,6 +10,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApiKeySecretStoreTest {
+    @Test fun allOfficialProvidersKeepKeysEncryptedAndIsolatedAcrossRestart() {
+        val prefs = MemoryPreferences()
+        val store = ProviderApiKeyStore(prefs, FakeTextCipher())
+        AiDefaults.providerIds.forEach { provider -> assertTrue(store.overwrite(provider, "$provider-fixture-key")) }
+        val restored = ProviderApiKeyStore(prefs, FakeTextCipher())
+        assertEquals(AiDefaults.providerIds, restored.configured.value)
+        AiDefaults.providerIds.forEach { provider ->
+            assertEquals("$provider-fixture-key", restored.readForAuthorization(provider))
+            assertFalse(prefs.all.values.contains("$provider-fixture-key"))
+        }
+        restored.clear("anthropic")
+        assertNull(restored.readForAuthorization("anthropic"))
+        assertEquals("gemini-fixture-key", restored.readForAuthorization("gemini"))
+    }
+
     @Test fun providerKeysAreIsolatedAndUnknownProviderCannotReceiveCredentials() {
         val prefs = MemoryPreferences()
         val store = ProviderApiKeyStore(prefs, FakeTextCipher())
@@ -34,7 +50,7 @@ class ApiKeySecretStoreTest {
         KeystoreApiKeySecretStore(prefs, FakeTextCipher()).overwrite("legacy-key")
         val store = ProviderApiKeyStore(prefs, FakeTextCipher())
         assertTrue(store.legacyConfigured.value)
-        listOf("ark", "openrouter", "kimi", "glm", "openai").forEach { assertNull(store.readForAuthorization(it)) }
+        AiDefaults.providerIds.forEach { assertNull(store.readForAuthorization(it)) }
         assertFalse(store.migrateLegacy("kimi"))
         assertTrue(store.migrateLegacy("openrouter"))
         assertFalse(store.legacyConfigured.value)

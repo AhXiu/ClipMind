@@ -12,7 +12,7 @@ ClipMind 是面向深度阅读用户的剪贴 AI 知识库。Phase 1 聚焦 Andr
 - 固定一级分类、二级标签复用/待确认/合并管理，忠于原文的三段式解读
 - OpenLibrary 真实书籍元数据校验
 - 标准 Markdown 卡片与 Obsidian 单向原子写入
-- Android 服务商与模型联动下拉：Kimi / GLM / GPT 官方 API，以及 Ark / OpenRouter；Key 按服务商隔离加密保存，详见 [LLM 接入说明](docs/llm-providers.md)。
+- Android 支持 Kimi / GLM / GPT / Claude / Gemini / DeepSeek / Qwen（新加坡）官方 API，以及 Ark / OpenRouter；Key 按服务商隔离加密保存，授权后获取实时文本模型列表（Ark / GLM 保留手动 ID），详见 [LLM 接入说明](docs/llm-providers.md)。
 
 - 本地向量 Top-5 召回与带原文证据的 LLM 相似/对立/互补关系候选
 - 真实文章搜索与正文摘要、已读过滤和低覆盖主题荐书

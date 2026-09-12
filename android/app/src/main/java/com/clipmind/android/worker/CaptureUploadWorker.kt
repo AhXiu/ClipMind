@@ -152,7 +152,7 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
 
     private suspend fun markAnalysisError(dao: CaptureOutboxDao, entity: CaptureOutboxEntity, code: String) {
         val now = System.currentTimeMillis()
-        if (code in setOf("BYOK_KEY_MISSING", "BYOK_MODEL_MISSING", "BYOK_VALIDATION", "BYOK_AUTH", "BYOK_MODEL_UNAVAILABLE", "BYOK_QUOTA")) {
+        if (com.clipmind.android.network.requiresByokConfigurationChange(code)) {
             dao.markRejected(listOf(entity.clientCaptureId), now, code)
             return
         }

@@ -3,6 +3,9 @@ package com.clipmind.android.knowledge
 import com.clipmind.android.data.AiCaptureConfiguration
 import com.clipmind.android.data.AiMode
 import com.clipmind.android.network.CaptureApi
+import com.clipmind.android.network.providerEnvelope
+import com.clipmind.android.network.providerKeyHeader
+import com.clipmind.android.network.providerKeyValue
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import kotlinx.coroutines.runBlocking
@@ -28,8 +31,8 @@ class KnowledgeProviderTest {
             val http = OkHttpClient.Builder().addInterceptor { chain ->
                 val body = JsonParser.parseString(Buffer().also { chain.request().body!!.writeTo(it) }.readUtf8()).asJsonObject
                 if (mode != AiMode.BYOK_ARK) assertFalse(body.has("temperature"))
-                assertEquals("Bearer ${mode.providerId}-key", chain.request().header("Authorization"))
-                val envelope = Gson().toJson(mapOf("choices" to listOf(mapOf("message" to mapOf("content" to Gson().toJson(result))))))
+                assertEquals(providerKeyValue(mode.providerId, "${mode.providerId}-key"), chain.request().header(providerKeyHeader(mode.providerId)))
+                val envelope = providerEnvelope(mode.providerId, Gson().toJson(result))
                 Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(envelope.toResponseBody()).build()
             }.build()
             val response = KnowledgeClient(api, http).generate(input, AiCaptureConfiguration(mode, "test-model"), "${mode.providerId}-key", null)

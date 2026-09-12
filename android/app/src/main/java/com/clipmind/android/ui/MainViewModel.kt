@@ -36,7 +36,7 @@ enum class CardTimeFilter { ALL, TODAY, WEEK }
 enum class CardAiFilter { ALL, PENDING, COMPLETE, FAILED }
 
 sealed interface ConnectionUiState { data object Idle : ConnectionUiState; data object Checking : ConnectionUiState; data object Connected : ConnectionUiState; data class Failed(val reason: String) : ConnectionUiState }
-sealed interface AiConnectionUiState { data object Idle : AiConnectionUiState; data object Checking : AiConnectionUiState; data object Success : AiConnectionUiState; data class Failed(val errorCode: String) : AiConnectionUiState }
+sealed interface AiConnectionUiState { data object Idle : AiConnectionUiState; data object Checking : AiConnectionUiState; data object Success : AiConnectionUiState; data class Failed(val errorCode: String, val httpStatus: Int? = null) : AiConnectionUiState }
 sealed interface CardOperationUiState { data object Working : CardOperationUiState; data class Success(val status: String) : CardOperationUiState; data class Failed(val errorCode: String) : CardOperationUiState }
 sealed interface ExportUiState { data object Idle : ExportUiState; data object Running : ExportUiState; data class Success(val cardCount: Int) : ExportUiState; data class Failed(val reason: String) : ExportUiState }
 
@@ -89,6 +89,7 @@ data class MainUiState(
     val configuredProviders: Set<String> = emptySet(),
     val legacyKeyConfigured: Boolean = false,
     val aiConnectionState: AiConnectionUiState = AiConnectionUiState.Idle,
+    val modelCatalog: ModelCatalogUiState = ModelCatalogUiState(),
     val exportState: ExportUiState = ExportUiState.Idle,
     val markdownTemplate: String = SettingsDefaults.MARKDOWN_TEMPLATE,
     val wikiLinkFormat: WikiLinkFormat = WikiLinkFormat.FILE_NAME,
@@ -128,6 +129,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val connectionState = MutableStateFlow<ConnectionUiState>(ConnectionUiState.Idle)
     private val aiConnectionState = MutableStateFlow<AiConnectionUiState>(AiConnectionUiState.Idle)
     private var modelTest: kotlinx.coroutines.Job? = null
+    private val modelCatalog = ModelCatalogController(viewModelScope, com.clipmind.android.network.ProviderModelClient()) {
+        provider -> container.apiKeyStore.readForAuthorization(provider)
+    }.apply { select(container.settings.aiMode.value) }
     private val cardOperations = MutableStateFlow<Map<Long, CardOperationUiState>>(emptyMap())
     private val selectedCardId = MutableStateFlow<Long?>(null)
     private val selectedRelations = selectedCardId.flatMapLatest { id ->
@@ -185,6 +189,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .combine(container.apiKeyStore.configured) { state, value -> state.copy(configuredProviders = value) }
         .combine(container.apiKeyStore.legacyConfigured) { state, value -> state.copy(legacyKeyConfigured = value) }
         .combine(aiConnectionState) { state, value -> state.copy(aiConnectionState = value) }
+        .combine(modelCatalog.state) { state, value -> state.copy(modelCatalog = value) }
         .combine(selectedCardId) { state, value -> state.copy(selectedCard = state.localCards.firstOrNull { it.id == value }) }
         .combine(selectedRelations.map { it to container.knowledgeRepository.decodeEvidence(it) }.flowOn(Dispatchers.Default)) { state, value ->
             val activeIds = state.localCards.map { it.id }.toSet()
@@ -214,7 +219,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun reconnect() = container.shizuku.reconnect()
     fun setMode(value: CaptureMode) = container.settings.setMode(value)
     private fun resetModelTest() { modelTest?.cancel(); aiConnectionState.value = AiConnectionUiState.Idle }
-    fun setAiMode(value: AiMode) { resetModelTest(); container.settings.setAiMode(value) }
+    fun setAiMode(value: AiMode) {
+        resetModelTest()
+        modelCatalog.select(value)
+        container.settings.setAiMode(value)
+        if (value.providerId in container.apiKeyStore.configured.value) modelCatalog.refresh(value)
+    }
+    fun refreshAiModels() = modelCatalog.refresh(container.settings.aiMode.value)
     fun setAiModel(mode: AiMode, value: String): Boolean {
         if (!mode.isByok || mode != container.settings.aiMode.value) return false
         resetModelTest()
@@ -235,16 +246,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         resetModelTest()
         return container.apiKeyStore.overwrite(mode.providerId, value).also {
             if (!it) message.value = "Key 保存失败，请检查格式或设备安全存储；不要填写 Bearer 前缀"
+            else { modelCatalog.invalidate(mode); modelCatalog.refresh(mode) }
         }
     }
     fun clearApiKey(mode: AiMode) {
+        if (!mode.isByok || mode != container.settings.aiMode.value) return
         resetModelTest()
+        modelCatalog.invalidate(mode)
         if (!container.apiKeyStore.clear(mode.providerId)) message.value = "Key 清除失败，请重试"
     }
     fun migrateLegacyKey(mode: AiMode) {
         if (!mode.isByok || mode != container.settings.aiMode.value) return
         resetModelTest()
         if (!container.apiKeyStore.migrateLegacy(mode.providerId)) message.value = "旧 Key 迁移失败，请重新输入当前服务商 Key"
+        else { modelCatalog.invalidate(mode); modelCatalog.refresh(mode) }
     }
     fun saveToken(value: String) = container.tokenStore.saveToken(value)
     fun clearToken() = container.tokenStore.clearToken()
@@ -370,7 +385,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         aiConnectionState.value = AiConnectionUiState.Checking
         modelTest = viewModelScope.launch { aiConnectionState.value = when (val result = container.clientAnalyzer.analyze(config.mode.providerId, config.model, key, "阅读时记录关键观点，有助于回顾和比较不同文章的论证。")) {
             is ByokAnalysisResult.Success -> AiConnectionUiState.Success
-            is ByokAnalysisResult.Failure -> AiConnectionUiState.Failed(result.code.name)
+            is ByokAnalysisResult.Failure -> AiConnectionUiState.Failed(result.code.name, result.httpStatus)
         } }
     }
 

@@ -36,7 +36,7 @@ class UserSettingsPersistenceTest {
     @Test fun providerModelsRemainIndependentAcrossSelectionAndRestart() {
         val prefs = TestPreferences()
         val settings = UserSettings(prefs)
-        listOf(AiMode.BYOK_KIMI, AiMode.BYOK_GLM, AiMode.BYOK_OPENAI, AiMode.BYOK_OPENROUTER, AiMode.BYOK_ARK).forEach { mode ->
+        AiMode.entries.filter { it.isByok }.forEach { mode ->
             assertTrue(settings.setAiModel(mode.providerId, "${mode.providerId}-test"))
             settings.setAiMode(mode)
             val restored = UserSettings(prefs)

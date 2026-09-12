@@ -361,7 +361,7 @@ func (v *countingBooks) Verify(_ context.Context, candidates []domain.BookCandid
 }
 
 func TestClientAnalysisSkipsDefaultProviderAndRecordsSource(t *testing.T) {
-	for _, source := range []string{"ark", "openrouter", "kimi", "glm", "openai"} {
+	for _, source := range []string{"ark", "openrouter", "kimi", "glm", "openai", "anthropic", "gemini", "deepseek", "qwen"} {
 		t.Run(source, func(t *testing.T) { testClientAnalysisSource(t, source) })
 	}
 }
