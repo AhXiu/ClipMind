@@ -136,7 +136,7 @@ class LocalCardRepository(
             val cards = dao.exportCards().map { value -> decrypt(value, value.sync).also { require(it.contentAvailable) { "卡片无法解密，导出已中止" } }.copy(bookSources=sources.filter { it.cardId == value.card.id && it.revision == value.card.contentRevision }) }
             val relations = dao.confirmedRelations()
             val evidence = relations.mapNotNull { r -> runCatching { r.encryptedEvidence?.let { r.id to Gson().fromJson(cipher.decrypt(it), com.clipmind.android.knowledge.RelationEvidence::class.java) } }.getOrNull() }.toMap()
-            val documents = listOf("weekly", "annotation", "raw_capture").flatMap { kind ->
+            val documents = listOf("weekly", "annotation", "topic", "raw_capture").flatMap { kind ->
                 db.readingDao().documents(kind).mapNotNull { row ->
                     val plain = cipher.decrypt(row.encryptedPayload)
                     if (kind == "raw_capture" && com.google.gson.JsonParser.parseString(plain).asJsonObject.get("card_id")?.asLong !in cards.map { it.id }) return@mapNotNull null

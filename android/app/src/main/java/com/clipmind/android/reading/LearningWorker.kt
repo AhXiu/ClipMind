@@ -66,7 +66,7 @@ class LearningWorker(context: Context, params: WorkerParameters): CoroutineWorke
                     for (match in matches) {
                         if (!allowed() || !container.learningSettings.state.value.automaticRelations || !container.semanticIndex.current(plan)) break
                         val input = KnowledgeRequest(listOf(plan.cards.first { it.id == source.id.toString() },match.card))
-                        val result = container.knowledgeClient.generate(input,config,container.apiKeyStore.readForAuthorization(),auth)
+                        val result = container.knowledgeClient.generate(input,config,container.apiKeyStore.readForAuthorization(config.mode.providerId),auth)
                         if (allowed() && container.learningSettings.state.value.automaticRelations) container.knowledgeRepository.save(input,result)
                     }
                 } catch (c: CancellationException) { throw c }

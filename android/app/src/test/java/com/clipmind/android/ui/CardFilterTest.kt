@@ -5,6 +5,26 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CardFilterTest {
+    @Test fun searchIncludesTagsNotesSourcesAndUrlsWithoutMutatingSession() {
+        val source = card(1, "Original", "Browser", 10, null).copy(
+            sourceUrl = "https://example.invalid/source", tags = listOf(TagEntity(1, "Research", "research", 10)),
+        )
+        val notes = mapOf(1L to listOf("My personal INSIGHT"))
+        listOf("research", "insight", "browser", "example.invalid", "original").forEach { query ->
+            assertEquals(listOf(1L), filterCards(listOf(source), query, null, CardTimeFilter.ALL, CardAiFilter.ALL, false, now, notes).map { it.id })
+        }
+        val session = LibrarySession(query = "insight", source = "Browser", selected = setOf(1L))
+        assertEquals("insight", session.query)
+        assertEquals(setOf(1L), session.selected)
+    }
+
+    @Test fun resultSnippetShowsMatchDeepInsideLongText() {
+        val text = "a".repeat(2000) + "needle" + "b".repeat(2000)
+        val snippet = searchSnippet(text, "NEEDLE")
+        org.junit.Assert.assertTrue(snippet.contains("needle"))
+        org.junit.Assert.assertTrue(snippet.length < 200)
+        assertEquals(text, searchSnippet(text, ""))
+    }
     private val now = 2_000_000_000_000
 
     @Test fun combinesTextSourceTimeAndAiFilters() {

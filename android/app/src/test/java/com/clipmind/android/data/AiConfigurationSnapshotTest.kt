@@ -8,6 +8,15 @@ import org.junit.Test
 class AiConfigurationSnapshotTest {
     private val cipher = FakeTextCipher()
 
+    @Test fun allDirectProvidersRemainBoundToTheCapturedTask() {
+        AiMode.entries.filter { it.isByok }.forEach { mode ->
+            val entity = createEncryptedCaptureEntity("text", "hash", null, null, CaptureMode.AUTO, OutboxState.READY, 1, cipher,
+                AiCaptureConfiguration(mode, "saved-model"))
+            assertEquals(mode.providerId, entity.aiProvider)
+            assertEquals("saved-model", entity.aiModel)
+        }
+    }
+
     @Test fun byokProviderAndModelAreCapturedAndDoNotFollowLaterSettings() {
         val snapshot = AiCaptureConfiguration(AiMode.BYOK_OPENROUTER, "vendor/model-v1")
         val entity = createEncryptedCaptureEntity(

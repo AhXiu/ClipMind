@@ -13,6 +13,7 @@ import com.clipmind.android.network.FixedProviderClient
 import com.clipmind.android.network.HealthChecker
 import com.clipmind.android.security.AndroidKeystoreTextCipher
 import com.clipmind.android.security.KeystoreApiKeySecretStore
+import com.clipmind.android.security.ProviderApiKeyStore
 import com.clipmind.android.security.SecureTokenStore
 import com.clipmind.android.service.CaptureProcessingDiagnostics
 import com.clipmind.android.shizuku.ShizukuController
@@ -52,7 +53,7 @@ class AppContainer(app: Application) {
             store.saveToken(BuildConfig.DEBUG_AUTH_TOKEN)
         }
     }
-    val apiKeyStore = KeystoreApiKeySecretStore(
+    val apiKeyStore = ProviderApiKeyStore(
         app.getSharedPreferences("secure_provider_key", Application.MODE_PRIVATE),
         AndroidKeystoreTextCipher("clipmind_byok_api_key_v1"),
     )

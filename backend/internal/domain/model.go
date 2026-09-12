@@ -130,8 +130,10 @@ type ClientAnalysis struct {
 }
 
 func ValidateClientAnalysis(a ClientAnalysis) error {
-	if a.Provider != "ark" && a.Provider != "openrouter" {
-		return errors.New("client_analysis.provider must be ark or openrouter")
+	switch a.Provider {
+	case "ark", "openrouter", "kimi", "glm", "openai":
+	default:
+		return errors.New("client_analysis.provider is unsupported")
 	}
 	if blankOrLong(a.Model, 200) {
 		return errors.New("client_analysis.model must be non-empty and at most 200 characters")

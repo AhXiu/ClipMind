@@ -361,13 +361,20 @@ func (v *countingBooks) Verify(_ context.Context, candidates []domain.BookCandid
 }
 
 func TestClientAnalysisSkipsDefaultProviderAndRecordsSource(t *testing.T) {
+	for _, source := range []string{"ark", "openrouter", "kimi", "glm", "openai"} {
+		t.Run(source, func(t *testing.T) { testClientAnalysisSource(t, source) })
+	}
+}
+
+func testClientAnalysisSource(t *testing.T, source string) {
+	t.Helper()
 	repo, err := store.OpenFile(filepath.Join(t.TempDir(), "store.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	capture := seedCapture(t, repo, "confirm", "byok")
 	capture.ClientAnalysis = &domain.ClientAnalysis{
-		Provider: "openrouter", Model: "anthropic/model", PrimaryTag: "认知",
+		Provider: source, Model: "test-model", PrimaryTag: "认知",
 		Interpretation: domain.Interpretation{Summary: "客户端总结", Insight: "客户端洞察", Action: "客户端行动"},
 		Books:          []domain.ClientBook{{Title: "Thinking", Author: "Author"}},
 	}
@@ -388,7 +395,7 @@ func TestClientAnalysisSkipsDefaultProviderAndRecordsSource(t *testing.T) {
 		t.Fatalf("versions=%d err=%v", len(versions), err)
 	}
 	version := versions[0]
-	if version.LLMProvider != "openrouter" || version.LLMModel != "anthropic/model" || version.Interpretation.Summary != "客户端总结" || len(version.Books) != 1 || !version.Books[0].Verified {
+	if version.LLMProvider != source || version.LLMModel != "test-model" || version.Interpretation.Summary != "客户端总结" || len(version.Books) != 1 || !version.Books[0].Verified {
 		t.Fatalf("unexpected client analysis version: %+v", version)
 	}
 }

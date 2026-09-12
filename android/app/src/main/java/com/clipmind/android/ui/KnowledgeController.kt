@@ -20,7 +20,7 @@ class KnowledgeController(
     private val generator: KnowledgeGenerator,
     private val config: () -> AiCaptureConfiguration,
     private val enabled: () -> Boolean,
-    private val apiKey: () -> String?,
+    private val apiKey: (String) -> String?,
     private val authorization: () -> String?,
     private val message: (String) -> Unit,
 ) {
@@ -58,7 +58,7 @@ class KnowledgeController(
                 if (config() != preview.config) throw KnowledgeFailure("CONFIG_CHANGED")
                 if (!repository.isCurrent(preview.input)) throw KnowledgeFailure("SOURCE_CHANGED")
                 val byok = preview.config.mode.isByok
-                val result = generator.generate(preview.input, preview.config, if (byok) apiKey() else null, if (byok) null else authorization())
+                val result = generator.generate(preview.input, preview.config, if (byok) apiKey(preview.config.mode.providerId) else null, if (byok) null else authorization())
                 ensureActive()
                 if (!enabled()) throw KnowledgeFailure("AI_DISABLED")
                 val id = repository.save(preview.input, result)

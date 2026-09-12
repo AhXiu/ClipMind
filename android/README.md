@@ -64,7 +64,9 @@ Manifest 仅声明联网、通知和前台服务（含 Android 14 `specialUse` �
 
 ## 测试
 
-本轮导航调整为「采集 / 卡片 / 知识 / 复习 / 设置」。详情页提供完整解读与向量关联；知识页管理关系、标签、已读书籍和探索推荐；复习页提供每日卡片、批注、周报和 Notion 输出。提醒、自动分析、自动关联和自动周报默认关闭，开启前展示后续数据发送范围与费用说明。具体配置、真实联调门槛和能力边界见 [阅读闭环说明](../docs/reading-loop.md)。
+AI 服务设置提供服务商与模型搜索下拉框，支持 Kimi、GLM、OpenAI 官方 Key 及 Ark/OpenRouter。旧版共用 Key 不自动推断归属，升级后需确认迁移或重新输入。支持范围、会员区别、模型目录和人工渐进启用流程见 [LLM 接入说明](../docs/llm-providers.md)。
+
+当前导航为「卡片 / 主题 / 回顾」，默认打开卡片库；统一 + 记录，设置与处理状态位于右上角。主题支持手动分组和个人笔记，详情优先展示原文与想法。新安装默认关闭 AI 与自动提交，已有配置保持不变；提醒、自动分析、自动关联和自动周报均按明确授权启用。完整落地范围、验收与人工渐进启用流程见 [安卓体验优化](../docs/android-friendly-ux.md)，阅读能力边界见 [阅读闭环说明](../docs/reading-loop.md)。
 
 本地验证使用 `./gradlew testDebugUnitTest lintDebug assembleDebug -Pclipmind.baseUrl=https://example.invalid/`；该 APK 不连接实际后端。`python3 scripts/check_migration.py` 含 v7 SQLite 数据保留检查，不能替代 Android 设备上的真实 Room 打开验证。
 
@@ -72,7 +74,7 @@ Manifest 仅声明联网、通知和前台服务（含 Android 14 `specialUse` �
 
 新增的 Room v5 迁移和任务回写 SQL 可在没有 Android SDK 的机器上运行 `python3 scripts/check_migration.py`，使用内存 SQLite 检查密文保留、任务抢占和旧响应隔离。该检查不能替代真机 Room schema 校验。
 
-详情页支持服务端/BYOK 分析结果离线展示。编辑正文后旧分析失效；“重试原任务”保留任务 ID，“重新生成 AI”创建新任务但仍使用原云端卡片。草稿仅保留在 ViewModel 内存中，不写入明文 Bundle。完整边界见 [第一阶段优化说明](../docs/phase1-optimization.md)。
+详情页支持服务端/BYOK 分析结果离线展示。编辑正文后旧分析失效；“重试原任务”保留任务 ID，“重新整理”创建新任务但仍使用原云端卡片。新卡片与想法草稿自动加密存入本机，原文编辑草稿和搜索词仅在内存中保留，均不写入明文 Bundle。历史实现背景见 [第一阶段优化说明](../docs/phase1-optimization.md)，当前行为以 [安卓体验优化](../docs/android-friendly-ux.md) 为准。
 
 JVM 单元测试覆盖：
 

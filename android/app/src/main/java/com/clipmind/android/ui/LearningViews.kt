@@ -40,7 +40,7 @@ fun LearningDialogs(state: MainUiState, vm: MainViewModel) {
                     items(preview.plan.cards, key = { it.id }) { Text("卡片 ${it.id} · v${it.revision}\n${it.text}") }
                 }
                 is LearningPreview.Week -> {
-                    item { Text("发送 ${preview.plan.start} 至 ${preview.plan.end} 的 ${preview.plan.cards.size} 张摘抄给后端模型归纳。批注不会发送。生成周报将替换本周已有报告，引用作为独立历史副本保留。") }
+                    item { Text("发送 ${preview.plan.start} 至 ${preview.plan.end} 的 ${preview.plan.cards.size} 张摘抄给后端模型归纳，可能产生 API 费用。批注不会发送。生成周报将替换本周已有报告，引用作为独立历史副本保留。") }
                     items(preview.plan.cards, key = { it.id }) { Text("卡片 ${it.id} · v${it.contentRevision}\n${it.content}") }
                 }
                 is LearningPreview.Notion -> {
@@ -120,12 +120,15 @@ fun ReviewScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues, 
     var reveal by remember(card?.id, card?.contentRevision) { mutableStateOf(false) }
     val answer = card?.let { state.learning.annotationDrafts["${it.id}:${it.contentRevision}"] }.orEmpty()
     var deleteDoc by remember { mutableStateOf<DocumentView?>(null) }
+    var section by remember { mutableStateOf("今天") }
+    var deleteDraft by remember { mutableStateOf<String?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("今天", "想法记录", "每周回顾", "Notion").forEach { value -> FilterChip(section == value, { section = value }, { Text(value) }) } } }
+        if (section == "今天") {
         item {
             FlatCard(Modifier.fillMaxWidth()) {
-                Text(if(due.isEmpty()) "今天的复习已完成" else "今天还剩 ${due.size} 张", style = MaterialTheme.typography.headlineSmall)
-                Text("每天最多 ${state.learningPreferences.dailyLimit} 张。先回忆，再看原文；理解与应用比记住句子更重要。")
-                Text("反馈式间隔重复（SM-2）；AI价值评级只用于优先级，不代表事实可信度。", style = MaterialTheme.typography.bodySmall)
+                Text(if (state.localCards.isEmpty()) "从记录开始" else if(due.isEmpty()) "今天先到这里" else "今天，重遇 ${due.size} 张卡片", style = MaterialTheme.typography.headlineSmall)
+                Text(if (state.localCards.isEmpty()) "记录第一张卡片后，再来慢慢回顾。" else "每天最多 ${state.learningPreferences.dailyLimit} 张。不必背诵，想想它与你的生活有什么关系。")
             }
         }
         if (card != null) item {
@@ -135,65 +138,99 @@ fun ReviewScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValues, 
                 TextButton({ reveal = !reveal }) { Text(if(reveal) "收起原文" else "回忆后查看原文") }
                 if (reveal) Text(card.content)
                 card.analysis?.takeIf { it.schemaVersion == 2 }?.let { a ->
-                    Text("复习价值：${valueLabel(a.value)} · ${a.valueReason}")
                     a.questions.forEachIndexed { i,q -> Text("${i+1}. $q") }
                 }
-                OutlinedTextField(answer,{ vm.learning.draft(card,it) },Modifier.fillMaxWidth(),label = { Text("我的思考／应用经历（仅本机保存）") },minLines = 3)
-                TextButton({ vm.learning.saveNote(card,answer) },enabled = answer.isNotBlank() && !state.learning.busy) { Text("保存个人批注") }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Recall.entries.forEach { recall -> OutlinedButton({ vm.learning.review(card,recall) },enabled = reveal && answer.isBlank() && !state.learning.busy) { Text(recall.label) } } }
-                if (answer.isNotBlank()) Text("先保存或清空批注，再完成复习。", style = MaterialTheme.typography.bodySmall)
-                TextButton({ vm.openCard(card.id) }) { Text("查看关联与完整解读") }
+                DraftRecoveryNotice(state, vm, "${card.id}:${card.contentRevision}")
+                OutlinedTextField(answer,{ vm.learning.draft(card,it) },Modifier.fillMaxWidth(),label = { Text("我的思考／应用经历（仅本机保存）") },minLines = 3, enabled = state.learning.draftsLoaded && "${card.id}:${card.contentRevision}" !in state.learning.unreadableDrafts)
+                state.learning.draftStatus["${card.id}:${card.contentRevision}"]?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                TextButton({ vm.learning.saveNote(card,answer) },enabled = answer.isNotBlank() && !state.learning.localBusy) { Text("保存想法") }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Recall.entries.forEach { recall -> OutlinedButton({ vm.learning.review(card,recall) },enabled = reveal && !state.learning.localBusy) { Text(recall.label) } } }
+                if (answer.isNotBlank()) Text("完成回顾时会一起保存想法，不需要清空。", style = MaterialTheme.typography.bodySmall)
+                Row { TextButton({ vm.learning.skipToday(card) }, enabled = !state.learning.localBusy) { Text("今天跳过") }; TextButton({ vm.openCard(card.id) }) { Text("查看卡片") } }
             }
         }
+        }
+        if (section == "每周回顾") {
         item {
             FlatCard(Modifier.fillMaxWidth()) {
                 Text("每周回顾",style = MaterialTheme.typography.titleLarge)
                 Button({ vm.learning.prepareWeek(state.localCards) },enabled = state.aiEnabled && !state.learning.busy) { Text("生成本周知识简报") }
-                OutlinedButton({ vm.learning.prepareNotion("ClipMind 今日复习",due.joinToString("\n\n") { "卡片 ${it.id}\n${it.content}\n${it.analysis?.questions.orEmpty().joinToString("\n")}" }) },enabled = due.isNotEmpty() && !state.learning.busy) { Text("将今日复习发送到 Notion") }
                 if (state.learning.busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); TextButton(vm.learning::cancel) { Text("取消等待") } }
             }
         }
-        item { SectionHeader("周报与个人批注") }
-        items(state.readerDocuments.filter { it.kind in setOf("weekly","annotation","task_error","transfer","book_source") }.take(50), key = { it.id }) { document ->
+        }
+        if (section == "Notion") item {
+            FlatCard(Modifier.fillMaxWidth()) {
+                Text("按需分享，不自动同步", style = MaterialTheme.typography.titleLarge)
+                Text("先在设置 → 数据与备份中配置 Notion。每次发送前都会预览确认，远端副本需单独管理。")
+                OutlinedButton({ vm.learning.prepareNotion("ClipMind 今日回顾",due.joinToString("\n\n") { "卡片 ${it.id}\n${it.content}" }) },enabled = due.isNotEmpty() && !state.learning.busy) { Text("预览今日卡片") }
+            }
+        }
+        if (section != "今天") {
+        if (section == "想法记录") {
+            item { DraftRecoveryNotice(state, vm) }
+            val drafts = state.learning.annotationDrafts.filterKeys { it != "manual" }.toList()
+            if (drafts.isNotEmpty()) item { SectionHeader("未完成草稿") }
+            items(drafts, key = { "draft-${it.first}" }) { (key, text) ->
+                FlatCard(Modifier.fillMaxWidth()) {
+                    Text("卡片 ${key.substringBefore(':')} · 原文版本 ${key.substringAfter(':')}", style = MaterialTheme.typography.bodySmall)
+                    Text(text)
+                    Row { TextButton({ onCopy(text) }) { Text("复制") }; TextButton({ deleteDraft = key }) { Text("删除草稿") } }
+                }
+            }
+        }
+        val documents = state.readerDocuments.filter { if (section == "想法记录") it.kind in setOf("annotation", "book_source") else it.kind == "weekly" }
+        if (documents.isEmpty()) item { EmptyState("这里还没有记录", if (section == "想法记录") "在卡片里写下想法，无需启用 AI。" else "每周回顾是可选能力，日常记录不依赖周报。") }
+        items(documents, key = { it.id }) { document ->
             var expanded by remember(document.id) { mutableStateOf(false) }
             FlatCard(Modifier.fillMaxWidth()) {
                 Text(document.text, maxLines = if(expanded) Int.MAX_VALUE else 4)
                 TextButton({ expanded = !expanded }) { Text(if(expanded) "收起" else "展开") }
                 Row {
                     TextButton({ onCopy(document.text) }) { Text("复制") }
-                    if (document.kind == "weekly") TextButton({ vm.learning.prepareNotion("ClipMind 知识周报",document.text) }) { Text("Notion") }
-                    TextButton({ deleteDoc = document }) { Text("删除") }
+                    if (section == "Notion") TextButton({ vm.learning.prepareNotion("ClipMind 知识周报",document.text) }) { Text("预览发送") }
+                    else TextButton({ deleteDoc = document }) { Text("删除") }
                 }
             }
         }
         item { Text("周报与批注是独立历史副本；删除原卡片不会删除它们。Notion 副本也需单独删除。",style = MaterialTheme.typography.bodySmall) }
+        }
+        item { Spacer(Modifier.height(80.dp)) }
     }
     deleteDoc?.let { doc -> AlertDialog(onDismissRequest = { deleteDoc = null },title = { Text("删除这份本地记录？") },text = { Text("不会删除原卡片，也不会删除 Notion 中的副本。") },confirmButton = { TextButton({ vm.learning.deleteDocument(doc.id); deleteDoc = null }) { Text("删除") } },dismissButton = { TextButton({ deleteDoc = null }) { Text("取消") } }) }
+    deleteDraft?.let { key -> AlertDialog(onDismissRequest = { deleteDraft = null }, title = { Text("删除未完成草稿？") }, text = { Text("只删除本机这份草稿，不影响原文或已保存的想法。") }, confirmButton = { TextButton({ vm.learning.draftText(key, ""); deleteDraft = null }) { Text("删除") } }, dismissButton = { TextButton({ deleteDraft = null }) { Text("取消") } }) }
 }
 
 fun valueLabel(value: String?) = when(value) { "high" -> "高"; "low" -> "低"; "medium" -> "中"; else -> "尚未评估" }
 
 @Composable
-fun LearningSettingsView(state: MainUiState, vm: MainViewModel) {
+fun LearningSettingsView(state: MainUiState, vm: MainViewModel, section: String = "提醒") {
     var proposed by remember { mutableStateOf<LearningPreferences?>(null) }
     var key by remember { mutableStateOf("") }
     var page by remember(state.learningPreferences.notionPage) { mutableStateOf(state.learningPreferences.notionPage) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) vm.showMessage("通知权限未授权，仍可在复习页或小组件查看") }
     val p = state.learningPreferences
     FlatCard(Modifier.fillMaxWidth()) {
-        Text("知识内化与自动任务",style = MaterialTheme.typography.titleLarge)
+        if (section == "提醒") {
+        Text("回顾节奏",style = MaterialTheme.typography.titleLarge)
         Row { Text("每日数量",Modifier.weight(1f)); (3..5).forEach { n -> FilterChip(p.dailyLimit == n,{ vm.setLearningPreferences(p.copy(dailyLimit=n)) },{ Text("$n") }) } }
         SettingToggle("每日复习提醒",p.reminders) { enabled -> vm.setLearningPreferences(p.copy(reminders=enabled)); if(enabled && Build.VERSION.SDK_INT>=33) permission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        }
+        if (section == "AI") {
+        Text("自动任务（高级）",style = MaterialTheme.typography.titleLarge)
         SettingToggle("自动价值评级、标签与思考题",p.automaticAnalysis) { if(it) proposed=p.copy(automaticAnalysis=true) else vm.setLearningPreferences(p.copy(automaticAnalysis=false)) }
         SettingToggle("自动向量关联（全库范围）",p.automaticRelations) { if(it) proposed=p.copy(automaticRelations=true) else vm.setLearningPreferences(p.copy(automaticRelations=false)) }
         SettingToggle("自动生成上周简报",p.weeklyReports) { if(it) proposed=p.copy(weeklyReports=true) else vm.setLearningPreferences(p.copy(weeklyReports=false)) }
         Text("自动任务每12小时尽力运行，受系统省电限制；不保证精确时刻。每轮最多分析3张、关联1张，失败不自动重试。关闭AI总开关会暂停所有模型任务。",style = MaterialTheme.typography.bodySmall)
+        }
+        if (section == "数据") {
         Text("Notion（仅在预览确认后发送）",style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(page,{ page=it },Modifier.fillMaxWidth(),label={ Text("父页面 UUID，含连字符") })
         OutlinedTextField(key,{ key=it },Modifier.fillMaxWidth(),label={ Text("Integration Token（加密保存，不回显）") },visualTransformation=PasswordVisualTransformation())
         Row {
             TextButton({ runCatching { java.util.UUID.fromString(page) }.onSuccess { vm.setLearningPreferences(p.copy(notionPage=page)); if(key.isNotBlank()) { vm.saveNotionKey(key); key="" } }.onFailure { vm.showMessage("请输入有效页面 UUID") } }) { Text("保存配置") }
             TextButton({ vm.clearNotionKey(); key="" }) { Text("清除 Token") }
+        }
         }
     }
     proposed?.let { value -> AlertDialog(onDismissRequest={ proposed=null },title={ Text("授权自动处理内容？") },text={ Text("开启后，已存及未来采集的卡片可能在后台发送：完整分析向后端模型发送原文、已确认标签和已读书名；向量关联经后端向 OpenAI 发送全库原文建立索引，并将 Top-5 配对交给所选 LLM；周报向后端模型发送上周摘抄。会产生外部模型费用，不会自动确认关系或发送 Notion。可随时关闭；已被服务商接受的请求无法保证撤回。") },confirmButton={ TextButton({ vm.setLearningPreferences(value); proposed=null }) { Text("同意并开启") } },dismissButton={ TextButton({ proposed=null }) { Text("取消") } }) }

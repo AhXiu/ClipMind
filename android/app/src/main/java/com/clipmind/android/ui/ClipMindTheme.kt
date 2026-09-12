@@ -182,7 +182,7 @@ fun TabGlyph(tab: AppTab, selected: Boolean, modifier: Modifier = Modifier) {
                 drawLine(color, center, Offset(size.width * .5f, size.height * .25f), stroke.width, StrokeCap.Round)
                 drawLine(color, center, Offset(size.width * .7f, size.height * .6f), stroke.width, StrokeCap.Round)
             }
-            AppTab.SETTINGS -> {
+            AppTab.SETTINGS, AppTab.STATUS -> {
                 drawCircle(color = color, radius = size.width * .31f, center = center, style = stroke)
                 drawCircle(color = color, radius = size.width * .09f, center = center)
                 repeat(4) { index ->

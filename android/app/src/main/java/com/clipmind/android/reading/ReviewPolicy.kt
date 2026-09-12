@@ -8,6 +8,9 @@ import kotlin.math.roundToInt
 enum class Recall(val score: Int, val label: String) { AGAIN(1, "未记住"), HARD(3, "困难"), GOOD(4, "记住了"), EASY(5, "容易") }
 
 object ReviewPolicy {
+    fun skip(old: ReviewEntity, now: Long, zone: ZoneId): ReviewEntity = old.copy(
+        dueAt = day(now, zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli(),
+    )
     fun day(now: Long, zone: ZoneId) = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
     /** SM-2 style feedback scheduling, not an alleged universal Ebbinghaus formula. */
     fun next(old: ReviewEntity, rating: Recall, now: Long, zone: ZoneId): ReviewEntity {

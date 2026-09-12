@@ -16,141 +16,149 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
     val card = state.selectedCard ?: return
     val editing = state.editDraft?.cardId == card.id
     val text = state.editDraft?.takeIf { it.cardId == card.id }?.content ?: card.content
-    var addTag by remember { mutableStateOf(false) }
+    var addTag by remember(card.id) { mutableStateOf(false) }
+    var addTopic by remember(card.id) { mutableStateOf(false) }
     var confirmGenerate by remember(card.id) { mutableStateOf(false) }
+    var more by remember(card.id) { mutableStateOf(false) }
+    var advancedAi by remember(card.id) { mutableStateOf(false) }
     val working = state.cardOperations[card.id] == CardOperationUiState.Working
-    LazyColumn(
-        Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             FlatCard(Modifier.fillMaxWidth()) {
-                Text("AI 解读", style = MaterialTheme.typography.titleLarge)
-                StatusPill(card.sync.aiLabel(), positive = card.sync.analysisState() == CardAnalysisState.COMPLETE)
-                card.analysis?.let { analysis ->
-                    Text(if (analysis.schemaVersion >= 2) "核心释义" else "总结（旧版）", style = MaterialTheme.typography.titleMedium)
-                    Text(analysis.interpretation.summary)
-                    Text(if (analysis.schemaVersion >= 2) "场景应用 · 模型推论" else "解读 · 模型推论", style = MaterialTheme.typography.titleMedium)
-                    Text(analysis.interpretation.insight)
-                    Text(if (analysis.schemaVersion >= 2) "认知启发" else "行动建议（旧版）", style = MaterialTheme.typography.titleMedium)
-                    Text(analysis.interpretation.action)
-                    Text("${analysis.provider} / ${analysis.model} · 内容版本 ${card.contentRevision}", style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton({ onCopy(analysis.interpretation.summary) }) { Text("复制总结") }
-                } ?: Text(
-                    if (card.sync.analysisState() == CardAnalysisState.COMPLETE) "分析已完成，点击下方获取结果；获取后可离线阅读。"
-                    else "提交后将在这里展示总结、解读和行动建议。",
-                )
-                Text(card.sync.syncLabel(), style = MaterialTheme.typography.bodySmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button({ vm.learning.prepareAnalysis(card.id) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("完整解读与思考题") }
-                    OutlinedButton({ vm.learning.prepareAnalysis(card.id,true) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("解读并检索真实文章") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("原文", style = MaterialTheme.typography.titleLarge)
+                    StatusPill(if (card.contentAvailable) "已存本机" else "无法解密", positive = card.contentAvailable)
                 }
-                Text("完整分析保存在本机；自动写入 Obsidian 的云端卡片独立管理，请使用本地导出获取完整内容。", style = MaterialTheme.typography.bodySmall)
+                if (editing) OutlinedTextField(text, vm::setEditDraft, Modifier.fillMaxWidth(), minLines = 5)
+                else Text(card.content, style = MaterialTheme.typography.bodyLarge)
+                Text("来源：${card.sourceApp ?: "未知"}", style = MaterialTheme.typography.bodySmall)
+                card.sourceUrl?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (editing) {
+                        Button({ vm.editCard(card.id, text) }, enabled = text.isNotBlank()) { Text("保存原文") }
+                        TextButton(vm::cancelEditing) { Text("取消编辑") }
+                    } else {
+                        OutlinedButton({ vm.beginEditing(card) }, enabled = card.contentAvailable && !working && card.sync?.uploadState?.let(::canEditCard) == true) { Text("编辑") }
+                        TextButton({ onCopy(card.content) }, enabled = card.contentAvailable) { Text("复制") }
+                        Box {
+                            TextButton({ more = true }) { Text("更多") }
+                            DropdownMenu(more, { more = false }) {
+                                DropdownMenuItem(text = { Text("加入主题") }, onClick = { more = false; addTopic = true })
+                                DropdownMenuItem(text = { Text("添加标签") }, onClick = { more = false; addTag = true })
+                                DropdownMenuItem(text = { Text("删除卡片") }, onClick = { more = false; vm.deleteCards(setOf(card.id)) })
+                            }
+                        }
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { card.tags.filter { it.status == "confirmed" }.forEach { tag -> StatusPill("#${tag.name}") } }
+            }
+        }
+        item { PersonalThoughts(card, state, vm) }
+        item {
+            FlatCard(Modifier.fillMaxWidth()) {
+                Text("相关卡片", style = MaterialTheme.typography.titleLarge)
+                OutlinedButton({ vm.knowledge.discover(card.id) }, enabled = !editing && card.contentAvailable && !state.knowledge.discovering) { Text(if (state.knowledge.discovering) "查找中" else "查找本地关联") }
+                Text("仅在本机匹配，不发送正文；相似不代表观点一致。", style = MaterialTheme.typography.bodySmall)
+                if (state.selectedRelations.isEmpty()) Text("还没有关联。也可以把卡片加入同一个主题。")
+            }
+        }
+        items(state.selectedRelations.filter { it.status in setOf(RelationStatus.CANDIDATE, RelationStatus.CONFIRMED) }, key = { "relation-${it.id}" }) { relation ->
+            val otherId = if (relation.sourceCardId == card.id) relation.targetCardId else relation.sourceCardId
+            val other = state.localCards.firstOrNull { it.id == otherId }
+            FlatCard(Modifier.fillMaxWidth()) {
+                Text(relationLabel(relation.relationType), style = MaterialTheme.typography.titleMedium)
+                Text(other?.content.orEmpty(), maxLines = 3)
+                state.relationEvidence[relation.id]?.let { Text("${it.reason}\n原文证据：${it.sourceQuote}\n关联证据：${it.targetQuote}", style = MaterialTheme.typography.bodySmall) }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton({ vm.openCard(otherId) }, enabled = !editing && other != null) { Text("查看卡片") }
+                    if (relation.status == RelationStatus.CANDIDATE) {
+                        TextButton({ vm.resolveRelation(relation.id, true) }) { Text("确认关联") }
+                        TextButton({ vm.resolveRelation(relation.id, false) }) { Text("忽略") }
+                    }
+                }
+            }
+        }
+        item {
+            FlatCard(Modifier.fillMaxWidth()) {
+                Text("AI 辅助", style = MaterialTheme.typography.titleLarge)
+                Text("不影响原文与个人想法，可按需使用。", style = MaterialTheme.typography.bodySmall)
+                StatusPill(card.sync.aiLabel(), positive = card.sync.analysisState() == CardAnalysisState.COMPLETE)
+                card.analysis?.let { a ->
+                    Text("核心观点", style = MaterialTheme.typography.titleMedium); Text(a.interpretation.summary)
+                    Text("启发与应用 · AI 推论", style = MaterialTheme.typography.titleMedium); Text(a.interpretation.insight); Text(a.interpretation.action)
+                    TextButton({ onCopy(a.interpretation.summary) }) { Text("复制总结") }
+                }
+                if (card.analysis == null) Button({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.uploadState?.let(::canQueueAnalysis) == true) { Text("帮我整理") }
+                if (!state.aiEnabled) Text("AI 已关闭，返回卡片库后可在右上角设置中按需开启。", style = MaterialTheme.typography.bodySmall)
                 card.sync?.lastErrorCode?.let { Text("处理错误：$it", color = MaterialTheme.colorScheme.error) }
+                card.sync?.serverLastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error) }
                 when (val operation = state.cardOperations[card.id]) {
                     is CardOperationUiState.Failed -> Text("操作失败：${operation.errorCode}", color = MaterialTheme.colorScheme.error)
                     CardOperationUiState.Working -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     else -> Unit
                 }
-            }
-        }
-        item {
-            FlatCard(Modifier.fillMaxWidth()) {
-                Text("原文", style = MaterialTheme.typography.titleMedium)
-                if (editing) OutlinedTextField(text, vm::setEditDraft, Modifier.fillMaxWidth(), minLines = 5)
-                else Text(card.content, style = MaterialTheme.typography.bodyLarge)
-                Text("来源应用：${card.sourceApp ?: "未知"}", style = MaterialTheme.typography.bodySmall)
-                card.sourceUrl?.let { Text("来源链接：$it", style = MaterialTheme.typography.bodySmall) }
-                StatusPill(card.sync.aiLabel(), positive = card.sync.analysisState() == CardAnalysisState.COMPLETE)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (editing) Button({ vm.editCard(card.id, text) }, enabled = text.isNotBlank()) { Text("保存") }
-                    else Button({ vm.beginEditing(card) }, enabled = card.contentAvailable && !working && card.sync?.uploadState?.let(::canEditCard) == true) { Text("编辑") }
-                    OutlinedButton({ onCopy(card.content) }, enabled = card.contentAvailable) { Text("复制原文") }
-                    OutlinedButton({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.uploadState?.let(::canQueueAnalysis) == true) {
-                        Text(if (card.sync?.serverCardId != null) "重新生成 AI" else "提交 AI")
+                TextButton({ advancedAi = !advancedAi }) { Text(if (advancedAi) "收起高级操作" else "更多 AI 与同步操作") }
+                if (advancedAi) {
+                    Text(card.sync.syncLabel(), style = MaterialTheme.typography.bodySmall)
+                    card.analysis?.let { Text("${it.provider} / ${it.model} · 原文版本 ${card.contentRevision}", style = MaterialTheme.typography.bodySmall) }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.uploadState?.let(::canQueueAnalysis) == true) { Text("重新整理") }
+                        if (card.sync?.uploadState == OutboxState.RETRYABLE_ERROR) OutlinedButton({ vm.retryAi(setOf(card.id)) }, enabled = state.aiEnabled) { Text("重试原任务") }
+                        OutlinedButton({ vm.learning.prepareAnalysis(card.id) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("深度解读与思考题") }
+                        OutlinedButton({ vm.learning.prepareAnalysis(card.id, true) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("检索延伸阅读") }
+                        OutlinedButton({ vm.learning.prepareSemantic(card.id) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("AI 查找关联") }
                     }
-                    if (card.sync?.uploadState == OutboxState.RETRYABLE_ERROR) {
-                        OutlinedButton({ vm.retryAi(setOf(card.id)) }, enabled = state.aiEnabled) { Text("重试原任务") }
+                    card.sync?.serverCardId?.let { serverId ->
+                        TextButton({ vm.refreshServerCard(card.id, serverId) }, enabled = !working && card.sync.uploadState == OutboxState.SUCCEEDED) { Text("获取云端结果") }
+                        if (shouldShowPublishAction(card.mode, card.sync.serverCardStatus) && card.analysis != null) TextButton({ vm.confirmServerCard(card.id, serverId) }, enabled = !working && !editing) { Text("确认写入 Obsidian") }
                     }
-                }
-                card.sync?.serverCardId?.let { serverId ->
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton({ vm.refreshServerCard(card.id, serverId) }, enabled = !working && card.sync.uploadState == OutboxState.SUCCEEDED) { Text("获取 AI 结果") }
-                        if (shouldShowPublishAction(card.mode, card.sync.serverCardStatus) && card.analysis != null) {
-                            Button({ vm.confirmServerCard(card.id, serverId) }, enabled = !working && !editing) { Text("确认写入 Obsidian") }
-                        }
+                    Text("深度解读、搜索使用后端模型。完整结果保存在本机，可通过设置导出；云端 Obsidian 副本独立管理。", style = MaterialTheme.typography.bodySmall)
+                    card.tags.filter { it.status == "pending" }.forEach { tag ->
+                        Row { Text(tag.name, Modifier.weight(1f)); TextButton({ vm.learning.tag(tag.id, "confirm") }) { Text("采用标签") }; TextButton({ vm.removeTag(card.id, tag.id) }) { Text("移除") } }
                     }
+                    card.analysis?.primaryTag?.takeIf { tag -> card.tags.none { it.name == tag } }?.let { tag -> TextButton({ vm.addTag(setOf(card.id), tag) }) { Text("采用分类：$tag") } }
                 }
-                TextButton({ vm.deleteCards(setOf(card.id)) }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("删除卡片") }
+                if (state.learning.busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(state.learning.progress.ifBlank { "处理中" }); TextButton(vm.learning::cancel) { Text("取消等待") } }
             }
         }
-        item {
-            FlatCard(Modifier.fillMaxWidth()) {
-                Text("标签", style = MaterialTheme.typography.titleMedium)
-                Text("一级：${card.analysis?.primaryTag ?: card.tags.firstOrNull { it.level == 1 }?.name ?: "待分类"}")
-                Text("二级已确认：${card.tags.filter { it.level == 2 && it.status == "confirmed" }.joinToString { it.name }.ifEmpty { "暂无" }}")
-                card.tags.filter { it.status == "pending" }.forEach { tag ->
-                    Row { Text("${tag.name} · 新增待确认", Modifier.weight(1f)); TextButton({ vm.learning.tag(tag.id,"confirm") }) { Text("确认") }; TextButton({ vm.removeTag(card.id,tag.id) }) { Text("移除此卡标签") } }
-                }
-                card.analysis?.primaryTag?.takeIf { candidate -> card.tags.none { it.name == candidate } }?.let { candidate ->
-                    Text("AI 候选：$candidate", style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton({ vm.addTag(setOf(card.id), candidate) }) { Text("采用标签") }
-                }
-                OutlinedButton({ addTag = true }) { Text("添加确认标签") }
-            }
-        }
-        item {
-            FlatCard(Modifier.fillMaxWidth()) {
-                Text("发现关联", style = MaterialTheme.typography.titleMedium)
-                Button({ vm.learning.prepareSemantic(card.id) }, enabled = !editing && state.aiEnabled && !state.learning.busy) { Text("语义 Top-5 + LLM 关联判断") }
-                Text("真实向量在本机检索；首次需授权建立全库加密索引。观点是否一致由 LLM 再判断，不由相似度分数决定。", style = MaterialTheme.typography.bodySmall)
-                if (state.learning.busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(state.learning.progress); TextButton(vm.learning::cancel) { Text("取消等待") } }
-                if(state.learning.matchSourceKey == "${card.id}:${card.contentRevision}") state.learning.matches.forEach { match -> Text("召回卡片 ${match.card.id} · 相似度 ${"%.3f".format(match.score)}\n${match.card.text.take(100)}", style = MaterialTheme.typography.bodySmall) }
-                Text("在最近 300 张本地卡片中按词语重合检索，最多推荐 5 张；不会外发正文。词语相似不代表观点一致。", style = MaterialTheme.typography.bodySmall)
-                OutlinedButton({ vm.knowledge.discover(card.id) }, enabled = !editing && card.contentAvailable && !state.knowledge.discovering) {
-                    Text(if (state.knowledge.discovering) "检索中" else "查找本地关联")
-                }
-            }
-        }
-        val candidates = state.selectedRelations.filter { it.status == RelationStatus.CANDIDATE }
-        if (candidates.isEmpty()) item { Text("暂无候选关系") }
-        items(candidates, key = { "candidate-${it.id}" }) { relation ->
-            FlatCard(Modifier.fillMaxWidth()) {
-                val otherId = if (relation.sourceCardId == card.id) relation.targetCardId else relation.sourceCardId
-                Text("${relationLabel(relation.relationType)} · ${if (relation.origin == "local_overlap") "本机词语匹配" else if (relation.origin == "llm") "模型建议" else "手动关联"}")
-                Text(when (relation.relationType) { "supports" -> "相似观点"; "contradicts", "extends", "example" -> "对立／互补视角"; else -> "仅同主题，尚不能判断观点关系" }, style = MaterialTheme.typography.titleMedium)
-                Text("方向：卡片 ${relation.sourceCardId} → 卡片 ${relation.targetCardId}", style = MaterialTheme.typography.bodySmall)
-                state.relationEvidence[relation.id]?.let { evidence ->
-                    val summary = if(relation.sourceCardId == card.id) evidence.targetSummary else evidence.sourceSummary
-                    summary?.let { Text("关联卡片摘要：$it") }
-                    Text(evidence.reason)
-                    Text("来源证据：“${evidence.sourceQuote}”", style = MaterialTheme.typography.bodySmall)
-                    Text("目标证据：“${evidence.targetQuote}”", style = MaterialTheme.typography.bodySmall)
-                }
-                state.localCards.firstOrNull { it.id == otherId }?.let { other ->
-                    Text(other.content.take(120))
-                    TextButton({ vm.openCard(otherId) }, enabled = !editing) { Text("查看相关卡片") }
-                    OutlinedButton({ vm.knowledge.prepare(setOf(card.id, otherId)) }, enabled = state.aiEnabled && !editing && !state.knowledge.running) { Text("归纳这两张卡片") }
-                }
-                Row { TextButton({ vm.resolveRelation(relation.id, true) }) { Text("确认") }; TextButton({ vm.resolveRelation(relation.id, false) }) { Text("忽略") } }
-            }
-        }
-        item { Text("已确认关系", style = MaterialTheme.typography.titleMedium) }
-        val confirmed = state.selectedRelations.filter { it.status == RelationStatus.CONFIRMED }
-        if (confirmed.isEmpty()) item { Text("暂无已确认关系") }
-        items(confirmed, key = { "confirmed-${it.id}" }) { relation ->
-            Text("${relationLabel(relation.relationType)}：卡片 ${relation.sourceCardId} → 卡片 ${relation.targetCardId}")
-        }
-        item { ReadingResults(card,state,vm) }
-        item { Spacer(Modifier.height(20.dp)) }
+        item { ReadingResults(card, state, vm) }
     }
     if (addTag) TextEntryDialog("添加标签", { addTag = false }, { vm.addTag(setOf(card.id), it); addTag = false })
-    if (confirmGenerate) AlertDialog(
-        onDismissRequest = { confirmGenerate = false },
-        title = { Text("提交当前内容进行分析？") },
-        text = { Text("原文将发送至配置的 AI 服务及后端，可能产生模型费用。重新生成会创建新任务并保留云端旧版本，新结果需确认后才写入 Obsidian。") },
-        confirmButton = { TextButton({ confirmGenerate = false; vm.queueAi(setOf(card.id)) }) { Text("确认提交") } },
-        dismissButton = { TextButton({ confirmGenerate = false }) { Text("取消") } },
-    )
+    if (addTopic) AddToTopicDialog(state, vm, setOf(card.id)) { addTopic = false }
+    if (confirmGenerate) AnalysisConsent(state, setOf(card.id), { confirmGenerate = false }) { vm.queueAi(setOf(card.id)); confirmGenerate = false }
+}
+
+@Composable
+fun PersonalThoughts(card: LocalCard, state: MainUiState, vm: MainViewModel) {
+    val key = "${card.id}:${card.contentRevision}"
+    val answer = state.learning.annotationDrafts[key].orEmpty()
+    var history by remember(card.id) { mutableStateOf(false) }
+    val notes = state.readerDocuments.filter { it.annotation?.cardId == card.id }
+    FlatCard(Modifier.fillMaxWidth()) {
+        Text("我的想法", style = MaterialTheme.typography.titleLarge)
+        DraftRecoveryNotice(state, vm, key)
+        OutlinedTextField(answer, { vm.learning.draft(card, it) }, Modifier.fillMaxWidth(), label = { Text("这让我想到什么？") }, minLines = 3, enabled = card.contentAvailable && state.learning.draftsLoaded && key !in state.learning.unreadableDrafts)
+        state.learning.draftStatus[key]?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        Row {
+            TextButton({ vm.learning.saveNote(card, answer) }, enabled = answer.isNotBlank() && !state.learning.localBusy && card.contentAvailable) { Text("保存想法") }
+            if (answer.isNotBlank()) TextButton({ vm.learning.draft(card, answer) }) { Text("重试草稿保存") }
+        }
+        Text("仅本机加密保存，不随 AI 整理发送。", style = MaterialTheme.typography.bodySmall)
+        if (state.learning.annotationDrafts.keys.any { it.startsWith("${card.id}:") && it != key }) Text("有旧版本的未完成想法，可在回顾 → 想法记录中找回。", style = MaterialTheme.typography.bodySmall)
+        if (notes.isNotEmpty()) {
+            TextButton({ history = !history }) { Text(if (history) "收起历史想法" else "已保存 ${notes.size} 条想法") }
+            if (history) notes.forEach { document ->
+                Text(document.annotation!!.text)
+                if (document.annotation.revision != card.contentRevision) Text("写于原文旧版本 ${document.annotation.revision}", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DraftRecoveryNotice(state: MainUiState, vm: MainViewModel, key: String? = null) {
+    if (!state.learning.draftsLoaded || (if (key == null) state.learning.unreadableDrafts.isNotEmpty() else key in state.learning.unreadableDrafts)) {
+        Text("草稿尚未恢复或无法解密，已保留原数据并阻止覆盖。", color = MaterialTheme.colorScheme.error)
+        TextButton(vm.learning::retryDraftRecovery) { Text("重试恢复草稿") }
+    }
 }

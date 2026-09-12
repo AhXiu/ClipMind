@@ -5,6 +5,61 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class UserSettingsPersistenceTest {
+    @Test fun newInstallIsLocalFirstEvenAfterChangingOtherSettingsAndRestarting() {
+        val prefs = TestPreferences()
+        val settings = UserSettings(prefs)
+        assertFalse(settings.aiEnabled.value)
+        assertFalse(settings.aiAutoSubmit.value)
+        settings.setMinimumCaptureLength(3)
+        assertFalse(UserSettings(prefs).aiEnabled.value)
+        assertFalse(UserSettings(prefs).aiAutoSubmit.value)
+    }
+
+    @Test fun existingExplicitAndLegacyAiPreferencesAreNotSilentlyChanged() {
+        val prefs = TestPreferences()
+        prefs.edit().putString("mode", CaptureMode.AUTO.name).apply()
+        assertTrue(UserSettings(prefs).aiEnabled.value)
+        prefs.edit().putBoolean("ai_enabled", false).putBoolean("ai_auto_submit", true).apply()
+        assertFalse(UserSettings(prefs).aiEnabled.value)
+        assertTrue(UserSettings(prefs).aiAutoSubmit.value)
+    }
+
+    @Test fun recentlySelectedModelsAreBoundedOrderedAndProviderIsolated() {
+        val prefs = TestPreferences()
+        val settings = UserSettings(prefs)
+        (1..7).forEach { settings.setAiModel("kimi", "custom-$it") }
+        settings.setAiModel("glm", "glm-5.3")
+        settings.setAiModel("kimi", "custom-5")
+        assertEquals(listOf("custom-5", "custom-7", "custom-6", "custom-4", "custom-3"), UserSettings(prefs).recentAiModels.value["kimi"])
+        assertEquals(listOf("glm-5.3"), UserSettings(prefs).recentAiModels.value["glm"])
+    }
+    @Test fun providerModelsRemainIndependentAcrossSelectionAndRestart() {
+        val prefs = TestPreferences()
+        val settings = UserSettings(prefs)
+        listOf(AiMode.BYOK_KIMI, AiMode.BYOK_GLM, AiMode.BYOK_OPENAI, AiMode.BYOK_OPENROUTER, AiMode.BYOK_ARK).forEach { mode ->
+            assertTrue(settings.setAiModel(mode.providerId, "${mode.providerId}-test"))
+            settings.setAiMode(mode)
+            val restored = UserSettings(prefs)
+            assertEquals(AiCaptureConfiguration(mode, "${mode.providerId}-test"), restored.captureAiConfiguration())
+        }
+        assertEquals("kimi-test", UserSettings(prefs).aiModels.value["kimi"])
+        assertFalse(settings.setAiModel("kimi", " "))
+        assertFalse(settings.setAiModel("kimi", "m".repeat(201)))
+        assertFalse(settings.setAiModel("unknown", "model"))
+        settings.setAiMode(AiMode.SERVER_ARK)
+        assertEquals(AiDefaults.ARK_MODEL, settings.captureAiConfiguration().model)
+    }
+
+    @Test fun legacyModelPreferencesArePreserved() {
+        val prefs = TestPreferences()
+        prefs.edit().putString("ark_model", "ep-original").putString("openrouter_model", "vendor/original").apply()
+        val settings = UserSettings(prefs)
+        settings.setAiMode(AiMode.BYOK_ARK)
+        assertEquals("ep-original", settings.captureAiConfiguration().model)
+        settings.setAiMode(AiMode.BYOK_OPENROUTER)
+        assertEquals("vendor/original", settings.captureAiConfiguration().model)
+    }
+
     @Test fun exportCaptureAndAiPreferencesSurviveRecreation() {
         val prefs = TestPreferences()
         UserSettings(prefs).apply {

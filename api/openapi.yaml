@@ -426,7 +426,7 @@ components:
       type: object
       required: [result, provider, model, prompt_version]
       properties:
-        provider: { type: string, enum: [ark, openrouter, openai, deterministic] }
+        provider: { type: string, enum: [ark, openrouter, kimi, glm, openai, deterministic] }
         model: { type: string }
         prompt_version: { type: string, enum: [knowledge-v1] }
         result:
@@ -489,7 +489,7 @@ components:
       description: 客户端 BYOK 的结构化结果；API key 不得提交到 backend。
       properties:
         schema_version: { type: integer, description: 2 表示核心释义/场景应用/认知启发；缺省保留旧模板 }
-        provider: { type: string, enum: [ark, openrouter] }
+        provider: { type: string, enum: [ark, openrouter, kimi, glm, openai] }
         model: { type: string, minLength: 1, maxLength: 200 }
         primary_tag: { type: string, enum: [人文, 商业, 技术, 认知, 职场, 社会, 随笔] }
         interpretation: { $ref: '#/components/schemas/Interpretation' }
@@ -527,7 +527,7 @@ components:
         primary_tag: { type: string }
         interpretation: { $ref: '#/components/schemas/Interpretation' }
         books: { type: array, items: { type: object } }
-        llm_provider: { type: string, enum: [ark, openrouter, openai, deterministic] }
+        llm_provider: { type: string, enum: [ark, openrouter, kimi, glm, openai, deterministic] }
         llm_model: { type: string }
         markdown: { type: string }
     AcceptedCapture:

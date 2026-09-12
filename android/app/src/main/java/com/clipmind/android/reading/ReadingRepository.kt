@@ -19,11 +19,12 @@ data class ReadingPlan(val card: LocalCard, val request: ReadingRequest)
 data class PersonalNote(val cardId: Long, val revision: Long, val text: String, val questions: List<String>, val createdAt: Long)
 data class ReadBook(val title: String)
 data class BookAttribution(val cardId: Long, val revision: Long, val workKey: String, val location: String, val quote: String, val confirmedAt: Long)
-data class DocumentView(val id: String, val kind: String, val text: String, val updatedAt: Long, val attribution: BookAttribution? = null)
+data class DocumentView(val id: String, val kind: String, val text: String, val updatedAt: Long, val attribution: BookAttribution? = null, val annotation: PersonalNote? = null, val topic: Topic? = null)
 
 class ReadingRepository(private val db: ClipMindDatabase, private val cards: LocalCardRepository, private val cipher: TextCipher, private val api: CaptureApi, private val filter: LocalSafetyFilter) {
     val dao = db.readingDao()
     private val gson = Gson()
+    private val notebook = NotebookRepository(RoomNotebookStorage(db), cipher)
     suspend fun prepare(id: Long, search: Boolean): ReadingPlan = withContext(Dispatchers.Default) {
         val card = cards.detail(id) ?: throw KnowledgeFailure("SOURCE_CHANGED")
         if (!card.contentAvailable || !ReadingContract.safeText(card.content) || filter.evaluate(card.content, card.sourceApp) != FilterResult.Allowed) throw KnowledgeFailure("UNSAFE_OR_OVER_6000")
@@ -86,7 +87,27 @@ class ReadingRepository(private val db: ClipMindDatabase, private val cards: Loc
         db.withTransaction {
             if (db.localCardDao().card(card.id)?.card?.contentRevision != card.contentRevision) throw KnowledgeFailure("SOURCE_CHANGED")
             saveDocument("annotation", gson.toJson(PersonalNote(card.id, card.contentRevision, text, card.analysis?.questions.orEmpty(), now)))
+            clearDraft(NotebookPolicy.draftKey(card.id, card.contentRevision), text)
         }
+    }
+    suspend fun drafts(): DraftRecovery = notebook.drafts()
+    suspend fun saveDraft(key: String, text: String) = notebook.saveDraft(key, text)
+    suspend fun clearDraft(key: String, expected: String) = notebook.clearDraft(key, expected)
+    suspend fun saveTopic(id: String?, value: Topic) = notebook.saveTopic(id, value)
+    suspend fun deleteTopic(id: String) = notebook.deleteTopic(id)
+
+    suspend fun completeReview(card: LocalCard, rating: Recall, note: String, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): Boolean = db.withTransaction {
+        if (dao.review(card.id)?.lastReviewDay == ReviewPolicy.day(now, zone).toString()) return@withTransaction false
+        if (note.isNotBlank()) saveNote(card, note)
+        review(card, rating, now, zone)
+        true
+    }
+
+    suspend fun skipToday(card: LocalCard, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()) = db.withTransaction {
+        if (db.localCardDao().card(card.id)?.card?.contentRevision != card.contentRevision) throw KnowledgeFailure("SOURCE_CHANGED")
+        val old = dao.review(card.id)?.takeIf { it.revision == card.contentRevision } ?: ReviewEntity(card.id, card.contentRevision, now)
+        if (old.lastReviewDay == ReviewPolicy.day(now, zone).toString()) return@withTransaction
+        dao.saveReview(ReviewPolicy.skip(old, now, zone))
     }
     suspend fun confirmBookSource(card: LocalCard, workKey: String, quote: String, location: String) {
         require(quote.length in 20..800 && card.content.contains(quote) && location.isNotBlank() && location.length <= 200)
@@ -112,16 +133,20 @@ class ReadingRepository(private val db: ClipMindDatabase, private val cards: Loc
         dao.saveDocument(ReaderDocument(id, kind, cipher.encrypt(text), System.currentTimeMillis())); return id
     }
     fun decode(row: ReaderDocument): DocumentView? = runCatching {
+        if (row.kind == "private_draft") return null
         val plain = cipher.decrypt(row.encryptedPayload)
         val attribution = if(row.kind == "book_source") gson.fromJson(plain,BookAttribution::class.java) else null
+        val annotation = if(row.kind == "annotation") gson.fromJson(plain,PersonalNote::class.java) else null
+        val topic = if(row.kind == "topic") NotebookPolicy.topic(gson.fromJson(plain,Topic::class.java)) else null
         val text = when(row.kind) {
             "read_book" -> gson.fromJson(plain, ReadBook::class.java).title
-            "annotation" -> gson.fromJson(plain, PersonalNote::class.java).let { "卡片 ${it.cardId} · v${it.revision}\n${it.text}" }
+            "annotation" -> annotation!!.let { "卡片 ${it.cardId} · v${it.revision}\n${it.text}" }
+            "topic" -> topic!!.let { "${it.title}\n${it.note}" }
             "recommendation" -> gson.fromJson(plain, RecommendationResponse::class.java).let { result -> "探索主题：${result.focusTopics.joinToString("、")}\n${result.basis}\n" + result.books.joinToString("\n") { "《${it.title}》 · ${it.author}\n${it.reason}\nhttps://openlibrary.org${it.openLibraryKey}" } }
             "book_source" -> attribution!!.let { "人工出处核对：卡片 ${it.cardId} v${it.revision}\n${it.workKey} · ${it.location}\n${it.quote}" }
             else -> plain
         }
-        DocumentView(row.id, row.kind, text, row.updatedAt, attribution)
+        DocumentView(row.id, row.kind, text, row.updatedAt, attribution, annotation, topic)
     }.getOrNull()
 }
 

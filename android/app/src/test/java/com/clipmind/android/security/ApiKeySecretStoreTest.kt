@@ -9,6 +9,51 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApiKeySecretStoreTest {
+    @Test fun providerKeysAreIsolatedAndUnknownProviderCannotReceiveCredentials() {
+        val prefs = MemoryPreferences()
+        val store = ProviderApiKeyStore(prefs, FakeTextCipher())
+        assertTrue(store.overwrite("kimi", " kimi-test-key "))
+        assertTrue(store.overwrite("glm", "glm-test-key"))
+        assertEquals("kimi-test-key", store.readForAuthorization("kimi"))
+        assertEquals("glm-test-key", store.readForAuthorization("glm"))
+        assertNull(store.readForAuthorization("openai"))
+        assertNull(store.readForAuthorization("https://attacker.invalid"))
+        assertFalse(store.overwrite("unknown", "key"))
+        assertFalse(store.overwrite("openai", "key\r\nheader"))
+        assertFalse(store.overwrite("openai", "Bearer key"))
+        assertTrue(prefs.all.values.none { it == "kimi-test-key" || it == "glm-test-key" })
+        val restored = ProviderApiKeyStore(prefs, FakeTextCipher())
+        assertEquals(setOf("kimi", "glm"), restored.configured.value)
+        assertTrue(restored.clear("kimi"))
+        assertEquals("glm-test-key", restored.readForAuthorization("glm"))
+        assertNull(restored.readForAuthorization("kimi"))
+    }
+
+    @Test fun legacyKeyNeverLeaksBeforeExplicitProviderAssignment() {
+        val prefs = MemoryPreferences()
+        KeystoreApiKeySecretStore(prefs, FakeTextCipher()).overwrite("legacy-key")
+        val store = ProviderApiKeyStore(prefs, FakeTextCipher())
+        assertTrue(store.legacyConfigured.value)
+        listOf("ark", "openrouter", "kimi", "glm", "openai").forEach { assertNull(store.readForAuthorization(it)) }
+        assertFalse(store.migrateLegacy("kimi"))
+        assertTrue(store.migrateLegacy("openrouter"))
+        assertFalse(store.legacyConfigured.value)
+        assertFalse(prefs.contains("encrypted_provider_api_key"))
+        assertEquals("legacy-key", store.readForAuthorization("openrouter"))
+        assertNull(store.readForAuthorization("ark"))
+        assertFalse(store.migrateLegacy("ark"))
+    }
+
+    @Test fun migrationDoesNotOverwriteAnExistingProviderKey() {
+        val prefs = MemoryPreferences()
+        KeystoreApiKeySecretStore(prefs, FakeTextCipher()).overwrite("legacy-key")
+        val store = ProviderApiKeyStore(prefs, FakeTextCipher())
+        store.overwrite("ark", "new-key")
+        assertFalse(store.migrateLegacy("ark"))
+        assertEquals("new-key", store.readForAuthorization("ark"))
+        assertTrue(store.legacyConfigured.value)
+    }
+
     @Test fun storesOnlyCiphertextAndExposesOnlyConfiguredStateForUi() {
         val prefs = MemoryPreferences()
         val store: ApiKeySecretStore = KeystoreApiKeySecretStore(prefs, FakeTextCipher())

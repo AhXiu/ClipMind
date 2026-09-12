@@ -114,7 +114,7 @@ func TestBatchAPIClientAnalysisValidationAndNoClientKey(t *testing.T) {
 	}
 	s := Server{Capture: service.New(repo, security.NewSafeFilter(1000), backup), Cards: service.Cards{Repo: repo}, Metrics: metrics.New(), AuthDisabled: true, Log: log.New(io.Discard, "", 0)}
 
-	invalid := `{"captures":[{"client_capture_id":"bad-analysis","raw_text":"safe","mode":"confirm","client_analysis":{"provider":"openai","model":"m","primary_tag":"技术","interpretation":{"summary":"s","insight":"i","action":"a"},"books":[]}}]}`
+	invalid := `{"captures":[{"client_capture_id":"bad-analysis","raw_text":"safe","mode":"confirm","client_analysis":{"provider":"unknown","model":"m","primary_tag":"技术","interpretation":{"summary":"s","insight":"i","action":"a"},"books":[]}}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/captures:batch", strings.NewReader(invalid))
 	req.Header.Set("Idempotency-Key", "invalid-analysis")
 	rr := httptest.NewRecorder()
@@ -130,6 +130,16 @@ func TestBatchAPIClientAnalysisValidationAndNoClientKey(t *testing.T) {
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest || strings.Contains(rr.Body.String(), "must-not-enter-backend") {
 		t.Fatalf("client key field was not safely rejected: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	for _, provider := range []string{"ark", "openrouter", "kimi", "glm", "openai"} {
+		body := fmt.Sprintf(`{"captures":[{"client_capture_id":%q,"raw_text":"safe","mode":"confirm","client_analysis":{"provider":%q,"model":"test-model","primary_tag":"技术","interpretation":{"summary":"s","insight":"i","action":"a"},"books":[]}}]}`, "client-"+provider, provider)
+		req = httptest.NewRequest(http.MethodPost, "/v1/captures:batch", strings.NewReader(body))
+		req.Header.Set("Idempotency-Key", "provider-"+provider)
+		rr = httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusAccepted || strings.Contains(rr.Body.String(), `"code":`) || !strings.Contains(rr.Body.String(), "client-"+provider) {
+			t.Fatalf("provider=%s status=%d body=%s", provider, rr.Code, rr.Body.String())
+		}
 	}
 }
 

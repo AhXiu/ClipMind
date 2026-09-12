@@ -7,6 +7,19 @@ import java.time.Instant
 import java.time.ZoneId
 
 class ReviewPolicyTest {
+    @Test fun skippingTodayDoesNotCountAsRecallOrChangeLearningParameters() {
+        val old = ReviewEntity(1, 1, now, 6, 2, 2.3, "2026-09-01")
+        val skipped = ReviewPolicy.skip(old, now, zone)
+        assertEquals(old.copy(dueAt = skipped.dueAt), skipped)
+        assertTrue(ReviewPolicy.due(listOf(card(1)), listOf(skipped), 3, now, zone).isEmpty())
+        assertEquals(1, ReviewPolicy.due(listOf(card(1)), listOf(skipped), 3, skipped.dueAt, zone).size)
+        assertEquals(3, ReviewPolicy.due((1L..10L).map { card(it) }, listOf(skipped), 3, now, zone).size)
+    }
+
+    @Test fun skippingUsesCalendarDayAcrossDaylightSaving() {
+        val midnight = Instant.parse("2026-03-08T05:00:00Z").toEpochMilli()
+        assertEquals(23 * 60 * 60 * 1000L, ReviewPolicy.skip(ReviewEntity(1, 1, midnight), midnight, ZoneId.of("America/New_York")).dueAt - midnight)
+    }
     private val zone = ZoneId.of("Asia/Shanghai")
     private val now = Instant.parse("2026-09-08T08:00:00Z").toEpochMilli()
     private fun card(id: Long, revision: Long = 1) = LocalCard(id,"Some source text",true,id,now,null,emptyList(),contentRevision=revision)

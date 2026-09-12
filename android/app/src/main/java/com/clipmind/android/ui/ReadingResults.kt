@@ -12,16 +12,12 @@ import com.clipmind.android.data.LocalCard
 fun ReadingResults(card: LocalCard, state: MainUiState, vm: MainViewModel) {
     val analysis = card.analysis?.takeIf { it.schemaVersion >= 2 } ?: return
     val uri = LocalUriHandler.current
-    val answer = state.learning.annotationDrafts["${card.id}:${card.contentRevision}"].orEmpty()
     var sourceBook by remember { mutableStateOf<com.clipmind.android.network.dto.AnalysisBook?>(null) }
     var quote by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
     FlatCard(Modifier.fillMaxWidth()) {
-        Text("思考与内化",style = MaterialTheme.typography.titleLarge)
-        Text("复习价值：${valueLabel(analysis.value)} · ${analysis.valueReason}")
+        Text("AI 延伸阅读",style = MaterialTheme.typography.titleLarge)
         analysis.questions.forEachIndexed { index,q -> Text("${index+1}. $q") }
-        OutlinedTextField(answer,{ vm.learning.draft(card,it) },Modifier.fillMaxWidth(),label={ Text("我的批注，不改动原文") },minLines=3)
-        TextButton({ vm.learning.saveNote(card,answer) },enabled=answer.isNotBlank() && !state.learning.busy) { Text("保存批注") }
         Text("推荐书籍",style = MaterialTheme.typography.titleLarge)
         if (analysis.books.isEmpty()) Text("暂无通过元数据校验的未读书籍；不会展示未经验证的候选。")
         analysis.books.filter { it.verified }.forEach { book ->

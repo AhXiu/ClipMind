@@ -191,7 +191,7 @@ func TestClientAnalysisAcceptedPersistedAndInvalidItemRejected(t *testing.T) {
 	}
 	svc := New(repo, security.NewSafeFilter(1000), backup)
 	invalid := validClientAnalysis()
-	invalid.Provider = "openai"
+	invalid.Provider = "unknown"
 	result, err := svc.Ingest("client-analysis", []CaptureInput{
 		{ClientCaptureID: "valid-analysis", RawText: "safe", Mode: "confirm", ClientAnalysis: validClientAnalysis()},
 		{ClientCaptureID: "invalid-analysis", RawText: "safe", Mode: "confirm", ClientAnalysis: invalid},

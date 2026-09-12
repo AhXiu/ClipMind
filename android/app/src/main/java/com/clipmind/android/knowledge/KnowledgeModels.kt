@@ -59,7 +59,7 @@ object KnowledgeContract {
     }.getOrDefault(false)
 
     fun validResponse(input: KnowledgeRequest, response: KnowledgeResponse): Boolean = runCatching {
-        response.provider in setOf("ark", "openrouter", "openai", "deterministic") && bounded(response.model, 200) &&
+        response.provider in com.clipmind.android.data.AiDefaults.providerIds + "deterministic" && bounded(response.model, 200) &&
             response.promptVersion == PROMPT_VERSION && validResult(input, response.result)
     }.getOrDefault(false)
 
