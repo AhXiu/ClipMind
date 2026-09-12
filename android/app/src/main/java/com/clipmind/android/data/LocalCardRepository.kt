@@ -14,6 +14,7 @@ import java.util.UUID
 import com.clipmind.android.domain.LocalSafetyFilter
 import com.clipmind.android.domain.FilterResult
 import com.clipmind.android.network.dto.ClientAnalysis
+import com.clipmind.android.network.ClientAnalysisRejection
 import com.google.gson.Gson
 
 /** Local-first card API. Cloud ids and AI output remain optional metadata. */
@@ -79,7 +80,7 @@ class LocalCardRepository(
         db.withTransaction {
             cardIds.count { id ->
                 val sync = dao.syncMetadata(id)
-                if (dao.card(id) == null || sync == null || !canQueueAnalysis(sync.uploadState)) false
+                if (dao.card(id) == null || sync == null || !canQueueAnalysis(sync.uploadState, sync.lastErrorCode)) false
                 else {
                     dao.setTaskId(id, UUID.randomUUID().toString())
                     dao.resetAnalysis(id, OutboxState.READY, config.mode.takeIf { it.isByok }?.providerId, config.model, now)
@@ -89,6 +90,16 @@ class LocalCardRepository(
         }
 
     suspend fun retryAi(ids: Set<Long>): Int = if (ids.isEmpty()) 0 else dao.retryAi(ids.toList())
+
+    /** A confirmed new submission bypasses no validation and preserves the original analysis/provider. */
+    suspend fun resubmitCachedAnalysis(id: Long, now: Long = System.currentTimeMillis()): Boolean = db.withTransaction {
+        if (dao.card(id) == null) return@withTransaction false
+        val sync = dao.syncMetadata(id) ?: return@withTransaction false
+        if (!canResubmitCachedAnalysis(sync)) return@withTransaction false
+        if (dao.prepareCachedResubmission(id, sync.lastErrorCode!!, now) != 1) return@withTransaction false
+        dao.setTaskId(id, UUID.randomUUID().toString())
+        true
+    }
 
     suspend fun syncMetadata(id: Long): SyncMetadataEntity? = dao.syncMetadata(id)
 
@@ -171,7 +182,13 @@ internal fun canEditCard(state: OutboxState): Boolean = state in setOf(
     OutboxState.LOCAL_ONLY, OutboxState.PENDING_CONFIRMATION, OutboxState.SUCCEEDED, OutboxState.REJECTED,
 )
 
-internal fun canQueueAnalysis(state: OutboxState): Boolean = canEditCard(state)
+internal fun canQueueAnalysis(state: OutboxState, errorCode: String? = null): Boolean = canEditCard(state) ||
+    (state == OutboxState.RETRYABLE_ERROR && ClientAnalysisRejection.fromStored(errorCode) != null)
+
+internal fun canResubmitCachedAnalysis(sync: SyncMetadataEntity?): Boolean = sync != null &&
+    sync.uploadState in setOf(OutboxState.REJECTED, OutboxState.RETRYABLE_ERROR) &&
+    ClientAnalysisRejection.fromStored(sync.lastErrorCode) != null && sync.encryptedClientAnalysis != null &&
+    sync.aiProvider in AiDefaults.providerIds && !sync.aiModel.isNullOrBlank()
 
 internal fun decryptAnalysis(sync: SyncMetadataEntity?, cipher: TextCipher): ClientAnalysis? = runCatching {
     if (sync?.uploadState in setOf(OutboxState.LOCAL_ONLY, OutboxState.PENDING_CONFIRMATION, OutboxState.DECRYPTION_FAILED)) return null

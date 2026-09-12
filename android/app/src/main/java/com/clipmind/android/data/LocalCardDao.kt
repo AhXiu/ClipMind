@@ -49,8 +49,18 @@ interface LocalCardDao {
     @Query("UPDATE local_cards SET clientCaptureId = :taskId WHERE id = :id")
     suspend fun setTaskId(id: Long, taskId: String)
 
-    @Query("UPDATE sync_metadata SET uploadState = 'READY', nextRetryAt = 0, lastErrorCode = NULL WHERE cardId IN (:ids) AND uploadState = 'RETRYABLE_ERROR'")
+    @Query("""UPDATE sync_metadata SET uploadState = 'READY', nextRetryAt = 0, lastErrorCode = NULL
+        WHERE cardId IN (:ids) AND uploadState = 'RETRYABLE_ERROR'
+        AND (lastErrorCode IS NULL OR (UPPER(lastErrorCode) != 'REJECTED_INVALID_CLIENT_ANALYSIS'
+            AND UPPER(lastErrorCode) NOT LIKE 'REJECTED_CLIENT_ANALYSIS_%'))""")
     suspend fun retryAi(ids: List<Long>): Int
+
+    @Query("""UPDATE sync_metadata SET uploadState = 'READY', retryCount = 0, nextRetryAt = 0,
+        lastErrorCode = NULL, updatedAt = :now
+        WHERE cardId = :id AND uploadState IN ('REJECTED', 'RETRYABLE_ERROR')
+        AND lastErrorCode = :expectedError AND encryptedClientAnalysis IS NOT NULL
+        AND EXISTS (SELECT 1 FROM local_cards WHERE id = :id AND deletedAt IS NULL)""")
+    suspend fun prepareCachedResubmission(id: Long, expectedError: String, now: Long): Int
 
     @Transaction
     @Query("SELECT * FROM local_cards WHERE deletedAt IS NULL ORDER BY capturedAt DESC")

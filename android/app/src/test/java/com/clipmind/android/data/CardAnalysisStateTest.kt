@@ -24,6 +24,15 @@ class CardAnalysisStateTest {
         assertEquals("上传待重试", sync.syncLabel())
     }
 
+    @Test fun oldValidationRejectionsDoNotAppearAsCompletedOrEnableSameTaskRetry() {
+        val sync = metadata(OutboxState.RETRYABLE_ERROR).copy(encryptedClientAnalysis = "cipher", lastErrorCode = "REJECTED_invalid_client_analysis")
+        assertEquals(CardAnalysisState.FAILED, sync.analysisState())
+        assertEquals("分析结果被后端拒绝，需处理", sync.syncLabel())
+        assertTrue(canQueueAnalysis(sync.uploadState, sync.lastErrorCode))
+        assertFalse(canQueueAnalysis(OutboxState.RETRYABLE_ERROR, "NETWORK_IO"))
+        assertFalse(canQueueAnalysis(OutboxState.UPLOADING, sync.lastErrorCode))
+    }
+
     @Test fun staleCacheCannotMakeEditedLocalContentComplete() {
         assertEquals(CardAnalysisState.LOCAL, metadata(OutboxState.LOCAL_ONLY).copy(encryptedClientAnalysis = "old").analysisState())
         assertEquals(CardAnalysisState.UNREADABLE, metadata(OutboxState.DECRYPTION_FAILED).analysisState())

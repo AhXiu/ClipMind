@@ -3,6 +3,7 @@ package com.clipmind.android.network
 import com.clipmind.android.data.CaptureMode
 import com.clipmind.android.data.CaptureOutboxEntity
 import com.clipmind.android.data.OutboxState
+import com.clipmind.android.data.AiDefaults
 import com.clipmind.android.network.dto.CaptureBatchRequest
 import com.clipmind.android.network.dto.CaptureBatchResponse
 import com.clipmind.android.network.dto.AnalysisBook
@@ -20,6 +21,28 @@ import org.junit.Test
 
 class CaptureContractTest {
     private val gson = Gson()
+
+    @Test fun everyProviderPreservesItsValidatedAnalysisThroughEncryptionAndUploadSerialization() {
+        val cipher = FakeTextCipher()
+        val raw = """{"primary_tag":"技术","interpretation":{"summary":"summary","insight":"insight","action":"action"},"books":[{"title":"title","author":"author"}]}"""
+        AiDefaults.providerIds.forEach { provider ->
+            val result = FixedProviderClient().parseResponse(providerEnvelope(provider, raw), provider, "test-model") as ByokAnalysisResult.Success
+            val entity = CaptureOutboxEntity(clientCaptureId = "task-$provider", encryptedRawText = cipher.encrypt("original"),
+                hash = "hash", sourceApp = null, sourceUrl = null, mode = CaptureMode.CONFIRM, state = OutboxState.READY,
+                capturedAt = 0, updatedAt = 0, aiProvider = provider, aiModel = "test-model",
+                encryptedClientAnalysis = cipher.encrypt(gson.toJson(result.analysis)))
+            val batch = prepareUploadBatch(listOf(entity), cipher)
+            assertTrue(batch.failures.isEmpty())
+            val json = JsonParser.parseString(gson.toJson(batch.uploads.single().item)).asJsonObject.getAsJsonObject("client_analysis")
+            assertEquals(setOf("provider", "model", "primary_tag", "interpretation", "books", "schema_version"), json.keySet())
+            assertEquals(provider, json["provider"].asString)
+            assertEquals("test-model", json["model"].asString)
+            assertEquals("技术", json["primary_tag"].asString)
+            assertEquals(2, json["schema_version"].asInt)
+            assertEquals(JsonParser.parseString(raw).asJsonObject["interpretation"], json["interpretation"])
+            assertEquals(JsonParser.parseString(raw).asJsonObject["books"], json["books"])
+        }
+    }
 
     @Test fun requestUsesBackendFieldNamesRfc3339AndLowercaseMode() {
         val entity = CaptureOutboxEntity(

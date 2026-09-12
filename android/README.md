@@ -52,7 +52,7 @@ Debug Manifest 仅为当前 BOE 联调开放明文 HTTP；Release 构建不会�
 - clipboard 接口不可靠地暴露来源应用，因此 Phase 1 的自动采集 `sourceApp/sourceUrl` 为 `null`；字段保留在 outbox/API 模型供可信来源后续填充。
 - 本地过滤包括：最小长度、纯 URL、手机号、身份证、验证码、token/密钥、私钥块与来源黑名单。被过滤内容不进入数据库。
 - 自动模式成功写入 `READY` 后会立即调度上传；确认模式写入 `PENDING_CONFIRMATION`，在 UI 确认并成功更新为 `READY` 后也会立即调度上传。15 分钟周期任务仅作为兜底。丢弃不会触发上传。
-- `/v1/captures:batch` 使用 snake_case DTO、RFC3339 `captured_at`、`Authorization` 与基于有序 client ID 集合 SHA-256 生成的稳定 `Idempotency-Key`。响应中的 `accepted[].client_capture_id` 才会转为 `SUCCEEDED`；`filtered_reject` 转为终态 `REJECTED`，其他拒绝或未明确确认的条目进入 `RETRYABLE_ERROR` 并指数退避。
+- `/v1/captures:batch` 使用 snake_case DTO、RFC3339 `captured_at`、`Authorization` 与基于有序 client ID 集合 SHA-256 生成的稳定 `Idempotency-Key`。响应中的 `accepted[].client_capture_id` 才会转为 `SUCCEEDED`；`filtered_reject`、`invalid_client_analysis` 转为终态 `REJECTED`，其他拒绝或未明确确认的条目进入 `RETRYABLE_ERROR` 并指数退避。后端校验拒绝需要先处理版本或字段问题，再人工确认“重新提交已有结果”；只更新提交标识、不删除旧回执、不重新调用模型。
 - Room 仅持久化 `encryptedRawText`：使用 Android Keystore 内不可导出的 AES-256 密钥和 `AES/GCM/NoPadding`，每条记录生成随机 12-byte IV；密文封装版本、IV、ciphertext 与独立 tag。日志中不记录剪贴板原文。
 - Room 当前为 v7，保留显式迁移链，未启用 `fallbackToDestructiveMigration`。v6→v7 增加阅读结果、向量、独立文档和复习计划，原有一级标签迁移为固定分类。禁止直接降级或用清库替代迁移。
 - 上传与 UI 展示只在内存中短暂解密。认证失败、密文损坏或 Keystore 密钥失效时绝不上传密文/垃圾数据，记录结构化错误并转为可见终态 `DECRYPTION_FAILED`；UI 显示“内容无法解密”。

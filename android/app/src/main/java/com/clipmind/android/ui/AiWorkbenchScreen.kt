@@ -37,7 +37,7 @@ fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingVal
         items(pending, key = { it.id }) { card ->
             SelectableCard(card, card.id in selected, { if (selected.isEmpty()) vm.openCard(card.id) else selected = selected.toggle(card.id) }, { selected = selected.toggle(card.id) },
                 "${if (card.contentAvailable) "已存本机" else "本机内容无法解密"} · ${card.sync.aiLabel()} · ${card.sync.syncLabel()}")
-            card.sync?.lastErrorCode?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            card.sync?.lastErrorCode?.let { Text(clientAnalysisFailureMessage(it) ?: it, color = MaterialTheme.colorScheme.error) }
             card.sync?.serverLastError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
         items(state.readerDocuments.filter { it.kind in setOf("task_error", "transfer") }, key = { it.id }) { doc ->

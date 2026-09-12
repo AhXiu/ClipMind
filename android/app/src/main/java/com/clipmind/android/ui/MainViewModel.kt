@@ -336,6 +336,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!container.settings.aiEnabled.value) { message.value = "请先启用 AI"; return@launch }
         val changed = container.localCardRepository.retryAi(ids)
         if (changed > 0) { UploadScheduler.scheduleImmediate(app); message.value = "已安排失败任务重试" }
+        else message.value = "该任务不能直接重试；分析结果被拒绝时，请先处理后端问题，再重新提交已有结果"
+    }
+    fun resubmitCachedAnalysis(id: Long) = viewModelScope.launch {
+        if (!container.settings.aiEnabled.value) { message.value = "请先启用 AI"; return@launch }
+        if (container.localCardRepository.resubmitCachedAnalysis(id)) {
+            UploadScheduler.scheduleImmediate(app)
+            message.value = "已安排重新提交已有分析，不重新调用模型"
+        } else message.value = "任务状态已变化或无可复用分析，请刷新后确认"
     }
     fun resolveRelation(id: Long, confirm: Boolean) = viewModelScope.launch {
         val changed = if (confirm) container.localCardRepository.confirmRelation(id) else container.localCardRepository.ignoreRelation(id)

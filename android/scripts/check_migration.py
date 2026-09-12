@@ -72,6 +72,29 @@ class MigrationTest(unittest.TestCase):
         self.db.execute("UPDATE local_cards SET clientCaptureId = 'task-new' WHERE id = 1")
         self.assertEqual(0, self.db.execute(query("updateServerCard"), values).rowcount)
 
+    def test_cached_resubmission_preserves_result_and_changes_only_submission_identity(self):
+        self.db.execute("UPDATE sync_metadata SET uploadState = 'REJECTED', lastErrorCode = 'REJECTED_invalid_client_analysis' WHERE cardId = 1")
+        values = {"id": 1, "expectedError": "REJECTED_invalid_client_analysis", "now": 300}
+        with self.db:
+            self.assertEqual(1, self.db.execute(query("prepareCachedResubmission", "LocalCardDao.kt"), values).rowcount)
+            self.db.execute(query("setTaskId", "LocalCardDao.kt"), {"id": 1, "taskId": "new-submission"})
+        self.assertEqual(("READY", "encrypted-analysis", "ark", "model", "server-card", None),
+            self.db.execute("SELECT uploadState,encryptedClientAnalysis,aiProvider,aiModel,serverCardId,lastErrorCode FROM sync_metadata WHERE cardId = 1").fetchone())
+        self.assertEqual(("encrypted-original", 1), self.db.execute("SELECT encryptedContent,contentRevision FROM local_cards WHERE id = 1").fetchone())
+        self.assertEqual(0, self.db.execute(query("claim"), {"id": 1, "taskId": "task-1", "now": 300}).rowcount)
+        self.assertEqual(1, self.db.execute(query("claim"), {"id": 1, "taskId": "new-submission", "now": 300}).rowcount)
+        self.assertEqual(0, self.db.execute(query("prepareCachedResubmission", "LocalCardDao.kt"), values).rowcount)
+
+    def test_validation_rejection_cannot_retry_old_identity_or_resubmit_deleted_card(self):
+        for code in ["REJECTED_invalid_client_analysis", "Rejected_invalid_client_analysis", "REJECTED_CLIENT_ANALYSIS_PROVIDER"]:
+            self.db.execute("UPDATE sync_metadata SET uploadState = 'RETRYABLE_ERROR', lastErrorCode = ? WHERE cardId = 1", (code,))
+            self.assertEqual(0, self.db.execute(query("retryAi", "LocalCardDao.kt"), {"ids": 1}).rowcount)
+        self.db.execute("UPDATE sync_metadata SET lastErrorCode = 'NETWORK_IO' WHERE cardId = 1")
+        self.assertEqual(1, self.db.execute(query("retryAi", "LocalCardDao.kt"), {"ids": 1}).rowcount)
+        self.db.execute("UPDATE sync_metadata SET uploadState = 'REJECTED', lastErrorCode = 'REJECTED_invalid_client_analysis' WHERE cardId = 2")
+        self.assertEqual(0, self.db.execute(query("prepareCachedResubmission", "LocalCardDao.kt"),
+            {"id": 2, "expectedError": "REJECTED_invalid_client_analysis", "now": 300}).rowcount)
+
     def test_relation_confirmation_requires_current_non_deleted_sources(self):
         self.db.execute("UPDATE local_cards SET deletedAt = NULL WHERE id = 2")
         self.db.execute("""INSERT INTO card_relations (sourceCardId,targetCardId,relationType,status,createdAt,updatedAt,sourceRevision,targetRevision)

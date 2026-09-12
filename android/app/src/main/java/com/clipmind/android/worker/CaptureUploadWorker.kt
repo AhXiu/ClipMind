@@ -8,6 +8,7 @@ import com.clipmind.android.data.CaptureOutboxDao
 import com.clipmind.android.data.CaptureOutboxEntity
 import com.clipmind.android.network.BatchRequestMetadata
 import com.clipmind.android.network.ByokAnalysisResult
+import com.clipmind.android.network.ClientAnalysisRejection
 import com.clipmind.android.network.dto.AcceptedCapture
 import com.clipmind.android.network.dto.CaptureBatchRequest
 import com.clipmind.android.network.dto.CaptureBatchResponse
@@ -50,6 +51,11 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         dao: CaptureOutboxDao,
         container: com.clipmind.android.AppContainer,
     ): Result {
+        // Older clients scheduled permanent validation rejections as retries. Stop them locally.
+        if (ClientAnalysisRejection.fromStored(candidate.lastErrorCode) != null) {
+            dao.markRejected(listOf(candidate.clientCaptureId), System.currentTimeMillis(), candidate.lastErrorCode!!)
+            return Result.success()
+        }
         // Recheck the current encrypted snapshot before either the provider or backend sees it.
         val text = try { container.textCipher.decrypt(candidate.encryptedRawText) }
         catch (e: TextCipherException) {
@@ -175,10 +181,10 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         acceptedMappings.forEach { accepted -> dao.markSucceeded(accepted.clientCaptureId, accepted.cardId, succeededAt) }
 
         val rejected = body.rejected.filter { it.clientCaptureId in batchByClientId && it.clientCaptureId !in acceptedIds }
-        val terminalRejectedIds = rejected.filter { it.code.equals("filtered_reject", ignoreCase = true) }
-            .map { it.clientCaptureId }.toSet()
-        if (terminalRejectedIds.isNotEmpty()) {
-            dao.markRejected(terminalRejectedIds.toList(), System.currentTimeMillis(), "filtered_reject")
+        val terminalRejections = terminalCaptureRejections(batch, body)
+        val terminalRejectedIds = terminalRejections.keys
+        terminalRejections.entries.groupBy { it.value }.forEach { (code, items) ->
+            dao.markRejected(items.map { it.key }, System.currentTimeMillis(), code)
         }
 
         var hasRetryable = false
@@ -215,6 +221,18 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) : Coroutin
 
 internal fun shouldInvokeClientAnalysis(entity: CaptureOutboxEntity): Boolean =
     entity.aiProvider != null && entity.encryptedClientAnalysis == null
+
+internal fun terminalCaptureRejections(batch: List<CaptureOutboxEntity>, body: CaptureBatchResponse): Map<String, String> {
+    val expected = batch.mapTo(mutableSetOf()) { it.clientCaptureId }
+    val accepted = acceptedCardMappings(batch, body).mapTo(mutableSetOf()) { it.clientCaptureId }
+    val terminal = mutableMapOf<String, String>()
+    body.rejected.filter { it.clientCaptureId in expected && it.clientCaptureId !in accepted }.forEach { item ->
+        val code = if (item.code.equals("filtered_reject", ignoreCase = true)) "filtered_reject"
+            else ClientAnalysisRejection.fromResponse(item)?.errorCode
+        if (code != null && terminal[item.clientCaptureId] != "filtered_reject") terminal[item.clientCaptureId] = code
+    }
+    return terminal
+}
 
 internal fun acceptedCardMappings(
     batch: List<CaptureOutboxEntity>,

@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.clipmind.android.data.*
 import com.clipmind.android.knowledge.relationLabel
+import com.clipmind.android.network.ClientAnalysisRejection
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -19,6 +20,7 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
     var addTag by remember(card.id) { mutableStateOf(false) }
     var addTopic by remember(card.id) { mutableStateOf(false) }
     var confirmGenerate by remember(card.id) { mutableStateOf(false) }
+    var confirmResubmit by remember(card.id) { mutableStateOf(false) }
     var more by remember(card.id) { mutableStateOf(false) }
     var advancedAi by remember(card.id) { mutableStateOf(false) }
     val working = state.cardOperations[card.id] == CardOperationUiState.Working
@@ -88,9 +90,11 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
                     Text("启发与应用 · AI 推论", style = MaterialTheme.typography.titleMedium); Text(a.interpretation.insight); Text(a.interpretation.action)
                     TextButton({ onCopy(a.interpretation.summary) }) { Text("复制总结") }
                 }
-                if (card.analysis == null) Button({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.uploadState?.let(::canQueueAnalysis) == true) { Text("帮我整理") }
+                if (card.analysis == null) Button({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.let { canQueueAnalysis(it.uploadState, it.lastErrorCode) } == true) { Text("帮我整理") }
                 if (!state.aiEnabled) Text("AI 已关闭，返回卡片库后可在右上角设置中按需开启。", style = MaterialTheme.typography.bodySmall)
-                card.sync?.lastErrorCode?.let { Text("处理错误：$it", color = MaterialTheme.colorScheme.error) }
+                card.sync?.lastErrorCode?.let { Text("处理错误：${clientAnalysisFailureMessage(it) ?: it}", color = MaterialTheme.colorScheme.error) }
+                if (canResubmitCachedAnalysis(card.sync)) OutlinedButton({ confirmResubmit = true },
+                    enabled = state.aiEnabled && !editing && !working && card.contentAvailable) { Text("重新提交已有结果") }
                 card.sync?.serverLastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error) }
                 when (val operation = state.cardOperations[card.id]) {
                     is CardOperationUiState.Failed -> Text("操作失败：${operation.errorCode}", color = MaterialTheme.colorScheme.error)
@@ -102,8 +106,9 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
                     Text(card.sync.syncLabel(), style = MaterialTheme.typography.bodySmall)
                     card.analysis?.let { Text("${it.provider} / ${it.model} · 原文版本 ${card.contentRevision}", style = MaterialTheme.typography.bodySmall) }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.uploadState?.let(::canQueueAnalysis) == true) { Text("重新整理") }
-                        if (card.sync?.uploadState == OutboxState.RETRYABLE_ERROR) OutlinedButton({ vm.retryAi(setOf(card.id)) }, enabled = state.aiEnabled) { Text("重试原任务") }
+                        OutlinedButton({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.let { canQueueAnalysis(it.uploadState, it.lastErrorCode) } == true) { Text("重新整理") }
+                        if (card.sync?.uploadState == OutboxState.RETRYABLE_ERROR && ClientAnalysisRejection.fromStored(card.sync.lastErrorCode) == null)
+                            OutlinedButton({ vm.retryAi(setOf(card.id)) }, enabled = state.aiEnabled) { Text("重试原任务") }
                         OutlinedButton({ vm.learning.prepareAnalysis(card.id) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("深度解读与思考题") }
                         OutlinedButton({ vm.learning.prepareAnalysis(card.id, true) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("检索延伸阅读") }
                         OutlinedButton({ vm.learning.prepareSemantic(card.id) }, enabled = state.aiEnabled && !editing && !state.learning.busy) { Text("AI 查找关联") }
@@ -126,6 +131,10 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
     if (addTag) TextEntryDialog("添加标签", { addTag = false }, { vm.addTag(setOf(card.id), it); addTag = false })
     if (addTopic) AddToTopicDialog(state, vm, setOf(card.id)) { addTopic = false }
     if (confirmGenerate) AnalysisConsent(state, setOf(card.id), { confirmGenerate = false }) { vm.queueAi(setOf(card.id)); confirmGenerate = false }
+    if (confirmResubmit) AlertDialog(onDismissRequest = { confirmResubmit = false }, title = { Text("重新提交已有分析？") },
+        text = { Text("请先确认后端已更新或校验问题已处理。将向 ClipMind 后端发送原文和已缓存的 ${card.sync?.aiProvider} / ${card.sync?.aiModel} 分析结果，不重新调用模型、不切换服务商。此次创建新的提交标识，旧拒绝记录不删除；后端仍会完整校验。") },
+        confirmButton = { TextButton({ confirmResubmit = false; vm.resubmitCachedAnalysis(card.id) }) { Text("确认重新提交") } },
+        dismissButton = { TextButton({ confirmResubmit = false }) { Text("取消") } })
 }
 
 @Composable

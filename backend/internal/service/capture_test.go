@@ -233,3 +233,41 @@ func TestClientAnalysisLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectedAnalysisReceiptIsStableAndNewSubmissionPreservesOldReceipt(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := store.OpenFile(filepath.Join(dir, "store.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := security.NewEncryptedFileBackup(filepath.Join(dir, "backup"), bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(repo, security.NewSafeFilter(1000), backup)
+	analysis := validClientAnalysis()
+	analysis.Provider = "unsupported-provider"
+	input := CaptureInput{ClientCaptureID: "old-task", RawText: "safe", Mode: "confirm", ClientAnalysis: analysis}
+	first, err := svc.Ingest("old-receipt", []CaptureInput{input})
+	if err != nil || len(first.Rejected) != 1 || first.Rejected[0].Code != "invalid_client_analysis" {
+		t.Fatalf("expected validation rejection: %+v, %v", first, err)
+	}
+	analysis.Provider = "anthropic"
+	replay, err := svc.Ingest("old-receipt", []CaptureInput{input})
+	if err != nil || len(replay.Rejected) != 1 || len(replay.Accepted) != 0 {
+		t.Fatalf("old rejection must remain replayable: %+v, %v", replay, err)
+	}
+	input.ClientCaptureID = "new-task"
+	accepted, err := svc.Ingest("new-receipt", []CaptureInput{input})
+	if err != nil || len(accepted.Accepted) != 1 || len(accepted.Rejected) != 0 {
+		t.Fatalf("new corrected submission must be validated: %+v, %v", accepted, err)
+	}
+	again, err := svc.Ingest("new-receipt", []CaptureInput{input})
+	if err != nil || len(again.Accepted) != 1 || again.Accepted[0].CaptureID != accepted.Accepted[0].CaptureID {
+		t.Fatalf("new submission retry must remain idempotent: %+v, %v", again, err)
+	}
+	old, err := svc.Ingest("old-receipt", []CaptureInput{input})
+	if err != nil || len(old.Rejected) != 1 || old.Rejected[0].Message != "client_analysis.provider is unsupported" {
+		t.Fatalf("old rejection audit evidence must not be deleted: %+v, %v", old, err)
+	}
+}
