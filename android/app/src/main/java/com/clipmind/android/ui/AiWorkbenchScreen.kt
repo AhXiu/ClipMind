@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.clipmind.android.data.*
 import com.clipmind.android.export.ExportFormat
+import com.clipmind.android.network.ClientAnalysisRejection
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -18,6 +19,7 @@ fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingVal
             it.sync?.uploadState == OutboxState.RETRYABLE_ERROR || it.sync?.serverLastError != null
     }
     var selected by remember { mutableStateOf(emptySet<Long>()) }
+    var resubmitCardId by remember { mutableStateOf<Long?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             FlatCard(Modifier.fillMaxWidth()) {
@@ -37,13 +39,32 @@ fun AiWorkbenchScreen(state: MainUiState, vm: MainViewModel, padding: PaddingVal
         items(pending, key = { it.id }) { card ->
             SelectableCard(card, card.id in selected, { if (selected.isEmpty()) vm.openCard(card.id) else selected = selected.toggle(card.id) }, { selected = selected.toggle(card.id) },
                 "${if (card.contentAvailable) "已存本机" else "本机内容无法解密"} · ${card.sync.aiLabel()} · ${card.sync.syncLabel()}")
+            if (ClientAnalysisRejection.fromStored(card.sync?.lastErrorCode) != null) ClientAnalysisTaskSource(card.sync)
             card.sync?.lastErrorCode?.let { Text(clientAnalysisFailureMessage(it) ?: it, color = MaterialTheme.colorScheme.error) }
+            if (canResubmitCachedAnalysis(card.sync)) OutlinedButton(
+                onClick = { resubmitCardId = card.id },
+                enabled = state.aiEnabled && card.contentAvailable && state.cardOperations[card.id] != CardOperationUiState.Working,
+            ) { Text("重新提交已有结果") }
             card.sync?.serverLastError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            when (val operation = state.cardOperations[card.id]) {
+                is CardOperationUiState.Failed -> Text("操作失败：${operation.errorCode}", color = MaterialTheme.colorScheme.error)
+                CardOperationUiState.Working -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                else -> Unit
+            }
         }
         items(state.readerDocuments.filter { it.kind in setOf("task_error", "transfer") }, key = { it.id }) { doc ->
             FlatCard(Modifier.fillMaxWidth()) { Text(doc.text) }
         }
         if (state.learning.busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(state.learning.progress.ifBlank { "AI 正在处理" }); TextButton(vm.learning::cancel) { Text("取消等待") } }
+    }
+    state.localCards.firstOrNull { it.id == resubmitCardId }?.let { card ->
+        CachedAnalysisResubmissionDialog(
+            sync = card.sync,
+            enabled = state.aiEnabled && card.contentAvailable && canResubmitCachedAnalysis(card.sync) &&
+                state.cardOperations[card.id] != CardOperationUiState.Working,
+            onDismiss = { resubmitCardId = null },
+            onConfirm = { resubmitCardId = null; vm.resubmitCachedAnalysis(card.id) },
+        )
     }
 }
 

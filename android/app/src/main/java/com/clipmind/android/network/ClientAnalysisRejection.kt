@@ -19,6 +19,7 @@ enum class ClientAnalysisRejection(val errorCode: String) {
         fun fromResponse(rejection: RejectedCapture): ClientAnalysisRejection? {
             if (!rejection.code.equals("invalid_client_analysis", ignoreCase = true)) return null
             return when (rejection.message) {
+                "client_analysis.provider must be ark or openrouter",
                 "client_analysis.provider is unsupported" -> PROVIDER
                 "client_analysis.model must be non-empty and at most 200 characters" -> MODEL
                 "client_analysis.primary_tag is invalid" -> TAG

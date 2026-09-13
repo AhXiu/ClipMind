@@ -1,5 +1,11 @@
 package com.clipmind.android.ui
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import com.clipmind.android.data.AiMode
+import com.clipmind.android.data.SyncMetadataEntity
 import com.clipmind.android.network.ClientAnalysisRejection
 
 internal fun clientAnalysisFailureMessage(code: String): String? {
@@ -15,4 +21,27 @@ internal fun clientAnalysisFailureMessage(code: String): String? {
         ClientAnalysisRejection.BOOKS -> "后端拒绝书籍字段：最多 10 本，书名非空且不超过 300 字，作者不超过 200 字。"
     }
     return "$detail 原文和已有分析仍保留在本机；同一提交会回放旧拒绝，不能靠反复重试解决。"
+}
+
+@Composable
+internal fun ClientAnalysisTaskSource(sync: SyncMetadataEntity?) {
+    val provider = sync?.aiProvider ?: return
+    val label = AiMode.entries.firstOrNull { it.isByok && it.providerId == provider }?.label ?: provider
+    Text("本次任务：$label / ${sync.aiModel.orEmpty()}")
+}
+
+@Composable
+internal fun CachedAnalysisResubmissionDialog(
+    sync: SyncMetadataEntity?,
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重新提交已有分析？") },
+        text = { Text("请先确认后端已更新或校验问题已处理。将向 ClipMind 后端发送原文和已缓存的 ${sync?.aiProvider} / ${sync?.aiModel} 分析结果，不重新调用模型、不切换服务商。此次创建新的提交标识，旧拒绝记录不删除；后端仍会完整校验。") },
+        confirmButton = { TextButton(onConfirm, enabled = enabled) { Text("确认重新提交") } },
+        dismissButton = { TextButton(onDismiss) { Text("取消") } },
+    )
 }

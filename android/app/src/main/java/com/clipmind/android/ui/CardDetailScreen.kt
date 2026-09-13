@@ -92,6 +92,7 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
                 }
                 if (card.analysis == null) Button({ confirmGenerate = true }, enabled = !editing && !working && state.aiEnabled && card.contentAvailable && card.sync?.let { canQueueAnalysis(it.uploadState, it.lastErrorCode) } == true) { Text("帮我整理") }
                 if (!state.aiEnabled) Text("AI 已关闭，返回卡片库后可在右上角设置中按需开启。", style = MaterialTheme.typography.bodySmall)
+                if (ClientAnalysisRejection.fromStored(card.sync?.lastErrorCode) != null) ClientAnalysisTaskSource(card.sync)
                 card.sync?.lastErrorCode?.let { Text("处理错误：${clientAnalysisFailureMessage(it) ?: it}", color = MaterialTheme.colorScheme.error) }
                 if (canResubmitCachedAnalysis(card.sync)) OutlinedButton({ confirmResubmit = true },
                     enabled = state.aiEnabled && !editing && !working && card.contentAvailable) { Text("重新提交已有结果") }
@@ -131,10 +132,12 @@ fun CardDetailScreen(state: MainUiState, vm: MainViewModel, padding: PaddingValu
     if (addTag) TextEntryDialog("添加标签", { addTag = false }, { vm.addTag(setOf(card.id), it); addTag = false })
     if (addTopic) AddToTopicDialog(state, vm, setOf(card.id)) { addTopic = false }
     if (confirmGenerate) AnalysisConsent(state, setOf(card.id), { confirmGenerate = false }) { vm.queueAi(setOf(card.id)); confirmGenerate = false }
-    if (confirmResubmit) AlertDialog(onDismissRequest = { confirmResubmit = false }, title = { Text("重新提交已有分析？") },
-        text = { Text("请先确认后端已更新或校验问题已处理。将向 ClipMind 后端发送原文和已缓存的 ${card.sync?.aiProvider} / ${card.sync?.aiModel} 分析结果，不重新调用模型、不切换服务商。此次创建新的提交标识，旧拒绝记录不删除；后端仍会完整校验。") },
-        confirmButton = { TextButton({ confirmResubmit = false; vm.resubmitCachedAnalysis(card.id) }) { Text("确认重新提交") } },
-        dismissButton = { TextButton({ confirmResubmit = false }) { Text("取消") } })
+    if (confirmResubmit) CachedAnalysisResubmissionDialog(
+        sync = card.sync,
+        enabled = state.aiEnabled && !editing && !working && card.contentAvailable && canResubmitCachedAnalysis(card.sync),
+        onDismiss = { confirmResubmit = false },
+        onConfirm = { confirmResubmit = false; vm.resubmitCachedAnalysis(card.id) },
+    )
 }
 
 @Composable
